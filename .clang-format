@@ -1,0 +1,24 @@
+---
+BasedOnStyle: LLVM
+UseTab: Always
+TabWidth: 4
+IndentWidth: 4
+ColumnLimit: 120
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+PointerAlignment: Right
+ReferenceAlignment: Right
+SpaceBeforeParens: ControlStatements
+IndentCaseLabels: true
+NamespaceIndentation: None
+SortIncludes: false
+
+BreakBeforeBraces: WebKit
+BreakConstructorInitializers: BeforeComma
+BreakBeforeConceptDeclarations: Always
+
+BraceWrapping:
+  AfterFunction: false
+  BeforeLambdaBody: false
