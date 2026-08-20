@@ -4,8 +4,9 @@
 // animates open/close (fade + scale, via CAnimator::EaseToward), and dims/blocks
 // everything behind it while open (IsBlocking).
 //
-// The panel is size-clamped (see kPanelMaxWidthBase/HeightBase in account_modal.cpp), not
-// a fraction of the window - otherwise it turns enormous on a large/1440p+ monitor.
+// The panel scales with the main window's own size (kPanelWidthFraction/HeightFraction in
+// account_modal.cpp), capped by kPanelMaxWidthBase/HeightBase so it doesn't turn enormous
+// on a large/1440p+ monitor.
 //
 // Three modes, same panel (only the inner content crossfades - position/size/backdrop
 // don't re-animate on a mode switch): ACCOUNT_LIST (pick/edit/remove an account, or add a
@@ -163,11 +164,21 @@ class CAccountModal : public CWidget {
 	Layout ComputeLayout() const;
 	Rect PanelRect() const;
 	Rect AccountsScrollRegionRect(Rect right) const;
-	float AccountsContentHeight(std::uint32_t accountCount) const;
+
+	// A note-less account's row is shorter than one with a note (see RowHeightForAccount in
+	// the .cpp), so each row's position is a running sum of the real heights before it, not
+	// a flat index * uniform-height multiply - ComputeRowLayout is that sum, computed once
+	// and shared by every caller that needs row geometry (draw, click/hover hit-testing,
+	// scroll content height) so they can never disagree with each other about where a row
+	// actually is. outTops/outHeights must each have room for count entries (callers already
+	// size these off kCarouselMaxVisibleAccounts, matching refs itself).
+	void ComputeRowLayout(const VisibleAccountRef *refs, std::uint32_t count, float *outTops,
+						  float *outHeights) const;
+	float AccountsContentHeight(const float *tops, const float *heights, std::uint32_t count) const;
 	Rect AccountsScrollbarTrackRect(Rect scrollRegion) const;
 	Rect CloseBadgeRect(Rect left) const;
 	Rect LoginButtonRect(Rect footer) const;
-	Rect RowRect(Rect right, std::uint32_t index) const;
+	Rect RowRect(Rect right, float top, float height) const;
 	Rect RowRemoveButtonRect(Rect row) const;
 	Rect RowEditButtonRect(Rect row) const;
 	Rect AddAccountButtonRect(Rect right) const;

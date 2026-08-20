@@ -17,12 +17,17 @@
 namespace {
 constexpr float kOpenEaseRate = 14.0f;
 
-// The panel is clamped to a fixed max size (not a fraction of the window) so it
-// doesn't balloon on a large/1440p+ monitor. Width stayed at 810; height is shorter
-// than a plain 1.5 aspect would give (480, not 540) - a flatter panel that takes up
-// less vertical space. kPanelMaxSizeScale grows both in lockstep with a larger Font
-// Size setting so bigger text gets more room instead of being squeezed/clipped into
-// the original size.
+// The panel scales with the main window's own size (see PanelRect) - kPanelWidthFraction/
+// kPanelHeightFraction of it - rather than sitting at a flat size regardless of how big or
+// small the window actually is. kPanelMaxWidthBase/HeightBase are still an absolute ceiling
+// on top of that (so it doesn't balloon on a large/1440p+ monitor): a 1.6875 aspect (810/480 -
+// flatter than a plain 1.5 would give, so it takes up less vertical space), tuned so the two
+// fractions below land almost exactly on this ceiling at this project's own default window
+// size - i.e. this is what the panel already looked like before it became size-responsive.
+// kPanelMaxSizeScale grows both in lockstep with a larger Font Size setting so bigger text
+// gets more room instead of being squeezed/clipped into the original size.
+constexpr float kPanelWidthFraction = 0.78f;  // of the main window's own width
+constexpr float kPanelHeightFraction = 0.71f; // of the main window's own height
 constexpr float kPanelMaxWidthBase = 810.0f;
 constexpr float kPanelMaxHeightBase = 480.0f;
 // Real baked pixels matching the default Settings Font Size of 16 nominal units - the
@@ -44,7 +49,6 @@ constexpr float kRowPadding = 24.0f;
 constexpr float kRowTopPadding = 14.0f; // above the username line
 constexpr float kRowLineGap = 4.0f;		// between the username and note lines
 constexpr float kRowBottomPadding = 10.0f;
-constexpr float kRowGap = 8.0f;
 constexpr float kRowButtonGap = 10.0f;
 
 constexpr float kLoginButtonWidth = 108.0f;
@@ -93,6 +97,16 @@ float RowHeightFor(const CFontManager &fonts)
 {
 	return kRowTopPadding + fonts.GetBody().GetLineHeight() + kRowLineGap + fonts.GetSecondary().GetLineHeight() +
 		   kRowBottomPadding;
+}
+
+// Every row is the same height regardless of whether its account has a note - see
+// DrawAccountRow's own centering of the username (plus note, if any) within that fixed
+// height. hasNote is unused for now; kept as a parameter so ComputeRowLayout's call site
+// doesn't need to change if a real reason to vary this shows up later.
+float RowHeightForAccount(const CFontManager &fonts, bool hasNote)
+{
+	(void)hasNote;
+	return RowHeightFor(fonts);
 }
 
 // Body, not secondary: the section title ("Accounts", "Edit Account", "Add Account")
@@ -312,8 +326,11 @@ Rect CAccountModal::PanelRect() const
 	const float availableW = std::max(0.0f, windowW - kPanelMargin * 2.0f);
 	const float availableH = std::max(0.0f, windowH - kPanelMargin * 2.0f);
 
-	float w = std::min(panelMaxWidth, availableW);
-	float h = std::min(panelMaxHeight, availableH);
+	// The smallest of: a fraction of the main window's own size (so the panel actually
+	// tracks it, smaller window and all), the absolute ceiling above, and whatever fits
+	// inside the margin.
+	float w = std::min({windowW * kPanelWidthFraction, panelMaxWidth, availableW});
+	float h = std::min({windowH * kPanelHeightFraction, panelMaxHeight, availableH});
 
 	// Whichever dimension is the binding constraint wins; shrink the other to match the
 	// target aspect so clamping never distorts the panel.
@@ -355,13 +372,32 @@ Rect CAccountModal::AccountsScrollRegionRect(Rect right) const
 	return Rect{right.X, right.Y + headerHeight, right.W, right.H - headerHeight};
 }
 
-float CAccountModal::AccountsContentHeight(std::uint32_t accountCount) const
+void CAccountModal::ComputeRowLayout(const VisibleAccountRef *refs, std::uint32_t count, float *outTops,
+									 float *outHeights) const
 {
-	if (accountCount == 0) {
+	// No gap added between rows - the header/list boundary line (DrawSectionTitle) is drawn
+	// in the exact same color as every row's own divider, so it reads as one more separator
+	// in the same sequence, and it sits flush against the first row with no gap before it.
+	// A real gap between every OTHER row's divider and the next row's top - not present here
+	// - made every one of those distances measurably longer than this first one, the actual
+	// bug: this is what makes every divider (including the header line above the first row)
+	// land exactly the same distance apart.
+	float y = 0.0f;
+	for (std::uint32_t i = 0; i < count; i += 1) {
+		const CAccount &account = m_carousel.GetBanner(refs[i].BannerIndex).Accounts[refs[i].AccountIndex];
+		const float height = RowHeightForAccount(m_fonts, account.GetNote().Length > 0);
+		outTops[i] = y;
+		outHeights[i] = height;
+		y += height;
+	}
+}
+
+float CAccountModal::AccountsContentHeight(const float *tops, const float *heights, std::uint32_t count) const
+{
+	if (count == 0) {
 		return 0.0f;
 	}
-	const float rowHeight = RowHeightFor(m_fonts);
-	return static_cast<float>(accountCount) * rowHeight + static_cast<float>(accountCount - 1) * kRowGap;
+	return tops[count - 1] + heights[count - 1];
 }
 
 constexpr float kScrollbarTrackMargin = 4.0f;
@@ -384,14 +420,11 @@ Rect CAccountModal::LoginButtonRect(Rect footer) const
 				kLoginButtonWidth, height};
 }
 
-Rect CAccountModal::RowRect(Rect right, std::uint32_t index) const
+Rect CAccountModal::RowRect(Rect right, float top, float height) const
 {
 	const float headerHeight = HeaderHeightFor(m_fonts);
-	const float rowHeight = RowHeightFor(m_fonts);
-	return Rect{right.X + kRowPadding,
-				right.Y + headerHeight + static_cast<float>(index) * (rowHeight + kRowGap) -
-					m_accountsScroll.m_flScrollOffset,
-				right.W - kRowPadding * 2.0f, rowHeight};
+	return Rect{right.X + kRowPadding, right.Y + headerHeight + top - m_accountsScroll.m_flScrollOffset,
+				right.W - kRowPadding * 2.0f, height};
 }
 
 Rect CAccountModal::RowRemoveButtonRect(Rect row) const
@@ -696,11 +729,14 @@ bool CAccountModal::OnPointerDown(float x, float y)
 
 	VisibleAccountRef refs[kCarouselMaxVisibleAccounts];
 	const std::uint32_t visibleCount = m_carousel.GetVisibleAccounts(static_cast<std::uint32_t>(m_nBannerIndex), refs);
+	float tops[kCarouselMaxVisibleAccounts];
+	float heights[kCarouselMaxVisibleAccounts];
+	ComputeRowLayout(refs, visibleCount, tops, heights);
 
 	const Layout layout = ComputeLayout();
 	const Rect scrollRegion = AccountsScrollRegionRect(layout.Right);
 	const Rect track = AccountsScrollbarTrackRect(scrollRegion);
-	const float contentHeight = AccountsContentHeight(visibleCount);
+	const float contentHeight = AccountsContentHeight(tops, heights, visibleCount);
 	m_accountsScroll.OnPointerDown(x, y, track, contentHeight, scrollRegion.H);
 	return true;
 }
@@ -716,11 +752,14 @@ bool CAccountModal::OnPointerMove(float x, float y)
 
 	VisibleAccountRef refs[kCarouselMaxVisibleAccounts];
 	const std::uint32_t visibleCount = m_carousel.GetVisibleAccounts(static_cast<std::uint32_t>(m_nBannerIndex), refs);
+	float tops[kCarouselMaxVisibleAccounts];
+	float heights[kCarouselMaxVisibleAccounts];
+	ComputeRowLayout(refs, visibleCount, tops, heights);
 
 	const Layout layout = ComputeLayout();
 	const Rect scrollRegion = AccountsScrollRegionRect(layout.Right);
 	const Rect track = AccountsScrollbarTrackRect(scrollRegion);
-	const float contentHeight = AccountsContentHeight(visibleCount);
+	const float contentHeight = AccountsContentHeight(tops, heights, visibleCount);
 	m_accountsScroll.OnPointerMove(y, track, contentHeight, scrollRegion.H);
 	(void)x;
 	return true;
@@ -761,6 +800,9 @@ bool CAccountModal::OnPointerUp(float x, float y)
 
 		VisibleAccountRef refs[kCarouselMaxVisibleAccounts];
 		const std::uint32_t visibleCount = m_carousel.GetVisibleAccounts(bannerIndex, refs);
+		float tops[kCarouselMaxVisibleAccounts];
+		float heights[kCarouselMaxVisibleAccounts];
+		ComputeRowLayout(refs, visibleCount, tops, heights);
 
 		const Rect scrollRegion = AccountsScrollRegionRect(layout.Right);
 		// Hit-testing is CPU-side and doesn't know about the GPU clip rect the draw side
@@ -770,7 +812,7 @@ bool CAccountModal::OnPointerUp(float x, float y)
 		const bool clickInScrollRegion = RectContainsPoint(scrollRegion, x, y);
 		bool clickedARow = false;
 		for (std::uint32_t i = 0; clickInScrollRegion && i < visibleCount; i += 1) {
-			const Rect row = RowRect(layout.Right, i);
+			const Rect row = RowRect(layout.Right, tops[i], heights[i]);
 			if (row.Y + row.H <= scrollRegion.Y || row.Y >= scrollRegion.Y + scrollRegion.H) {
 				continue; // scrolled out of view
 			}
@@ -937,10 +979,13 @@ ECursorKind CAccountModal::GetDesiredCursor() const
 
 		VisibleAccountRef refs[kCarouselMaxVisibleAccounts];
 		const std::uint32_t visibleCount = m_carousel.GetVisibleAccounts(bannerIndex, refs);
+		float tops[kCarouselMaxVisibleAccounts];
+		float heights[kCarouselMaxVisibleAccounts];
+		ComputeRowLayout(refs, visibleCount, tops, heights);
 		const Rect scrollRegion = AccountsScrollRegionRect(layout.Right);
 		if (RectContainsPoint(scrollRegion, m_flMouseX, m_flMouseY)) {
 			for (std::uint32_t i = 0; i < visibleCount; i += 1) {
-				const Rect row = RowRect(layout.Right, i);
+				const Rect row = RowRect(layout.Right, tops[i], heights[i]);
 				if (row.Y + row.H <= scrollRegion.Y || row.Y >= scrollRegion.Y + scrollRegion.H) {
 					continue;
 				}
@@ -948,7 +993,7 @@ ECursorKind CAccountModal::GetDesiredCursor() const
 					return ECursorKind::CURSOR_HAND;
 				}
 			}
-			if (CScrollable::IsVisible(AccountsContentHeight(visibleCount), scrollRegion.H) &&
+			if (CScrollable::IsVisible(AccountsContentHeight(tops, heights, visibleCount), scrollRegion.H) &&
 				RectContainsPoint(AccountsScrollbarTrackRect(scrollRegion), m_flMouseX, m_flMouseY)) {
 				return ECursorKind::CURSOR_HAND;
 			}
@@ -1019,6 +1064,9 @@ bool CAccountModal::OnRightPointerUp(float x, float y)
 	const auto bannerIndex = static_cast<std::uint32_t>(m_nBannerIndex);
 	VisibleAccountRef refs[kCarouselMaxVisibleAccounts];
 	const std::uint32_t visibleCount = m_carousel.GetVisibleAccounts(bannerIndex, refs);
+	float tops[kCarouselMaxVisibleAccounts];
+	float heights[kCarouselMaxVisibleAccounts];
+	ComputeRowLayout(refs, visibleCount, tops, heights);
 
 	const Layout layout = ComputeLayout();
 	const Rect scrollRegion = AccountsScrollRegionRect(layout.Right);
@@ -1028,7 +1076,7 @@ bool CAccountModal::OnRightPointerUp(float x, float y)
 	}
 
 	for (std::uint32_t i = 0; i < visibleCount; i += 1) {
-		const Rect row = RowRect(layout.Right, i);
+		const Rect row = RowRect(layout.Right, tops[i], heights[i]);
 		if (row.Y + row.H <= scrollRegion.Y || row.Y >= scrollRegion.Y + scrollRegion.H) {
 			continue;
 		}
@@ -1056,10 +1104,13 @@ bool CAccountModal::OnScroll(float x, float y, float wheelDelta)
 
 	VisibleAccountRef refs[kCarouselMaxVisibleAccounts];
 	const std::uint32_t visibleCount = m_carousel.GetVisibleAccounts(static_cast<std::uint32_t>(m_nBannerIndex), refs);
+	float tops[kCarouselMaxVisibleAccounts];
+	float heights[kCarouselMaxVisibleAccounts];
+	ComputeRowLayout(refs, visibleCount, tops, heights);
 
 	const Layout layout = ComputeLayout();
 	const Rect scrollRegion = AccountsScrollRegionRect(layout.Right);
-	const float contentHeight = AccountsContentHeight(visibleCount);
+	const float contentHeight = AccountsContentHeight(tops, heights, visibleCount);
 	m_accountsScroll.OnScroll(wheelDelta, contentHeight, scrollRegion.H);
 	return true;
 }
@@ -1191,17 +1242,16 @@ void CAccountModal::DrawAccountRow(CDrawList &drawList, Rect right, Rect row, co
 	const CFont &secondary = m_fonts.GetSecondary();
 	const CStringView note = account.GetNote();
 
-	// Center the username (plus note below it, if there is one) vertically in the row.
-	float usernameBaselineY;
-	float noteBaselineY = 0.0f;
-	if (note.Length > 0) {
-		const float blockHeight = body.GetLineHeight() + kRowLineGap + secondary.GetLineHeight();
-		const float blockY = row.Y + (row.H - blockHeight) * 0.5f;
-		usernameBaselineY = blockY + body.GetAscent();
-		noteBaselineY = blockY + body.GetLineHeight() + kRowLineGap + secondary.GetAscent();
-	} else {
-		usernameBaselineY = row.Y + (row.H - body.GetLineHeight()) * 0.5f + body.GetAscent();
-	}
+	// Always block-centered as if a note were present (even when it isn't) - the username's
+	// own baseline then lands at the exact same offset from row.Y on every row regardless of
+	// note/no-note, which is what actually makes the rows read as aligned; centering a lone
+	// username across the *whole* row instead (an earlier version of this) put its baseline
+	// somewhere different than a note row's, so the first line of text visibly jumped around
+	// row to row even though the divider grid itself was already uniform.
+	const float blockHeight = body.GetLineHeight() + kRowLineGap + secondary.GetLineHeight();
+	const float blockY = row.Y + (row.H - blockHeight) * 0.5f;
+	const float usernameBaselineY = blockY + body.GetAscent();
+	const float noteBaselineY = blockY + body.GetLineHeight() + kRowLineGap + secondary.GetAscent();
 	DrawText(drawList, body, row.X, usernameBaselineY, account.GetUsername(), ColorFadeAlpha(kColorTextBright, alpha));
 	if (note.Length > 0) {
 		DrawText(drawList, secondary, row.X, noteBaselineY, note, ColorFadeAlpha(kColorTextDim, alpha));
@@ -1248,13 +1298,16 @@ void CAccountModal::DrawAccountList(CDrawList &drawList, Rect right, std::uint8_
 	const auto bannerIndex = static_cast<std::uint32_t>(m_nBannerIndex);
 	VisibleAccountRef refs[kCarouselMaxVisibleAccounts];
 	const std::uint32_t visibleCount = m_carousel.GetVisibleAccounts(bannerIndex, refs);
+	float tops[kCarouselMaxVisibleAccounts];
+	float heights[kCarouselMaxVisibleAccounts];
+	ComputeRowLayout(refs, visibleCount, tops, heights);
 
 	const Rect scrollRegion = AccountsScrollRegionRect(right);
 	// Real GPU-side clipping - a row that's scrolled halfway behind the header genuinely
 	// can't paint outside scrollRegion.
 	drawList.PushClipRect(scrollRegion);
 	for (std::uint32_t i = 0; i < visibleCount; i += 1) {
-		const Rect row = RowRect(right, i);
+		const Rect row = RowRect(right, tops[i], heights[i]);
 		if (row.Y + row.H <= scrollRegion.Y || row.Y >= scrollRegion.Y + scrollRegion.H) {
 			continue; // cheap cull, clip still applies
 		}
@@ -1265,7 +1318,7 @@ void CAccountModal::DrawAccountList(CDrawList &drawList, Rect right, std::uint8_
 	}
 	drawList.PopClipRect();
 
-	const float contentHeight = AccountsContentHeight(visibleCount);
+	const float contentHeight = AccountsContentHeight(tops, heights, visibleCount);
 	m_accountsScroll.Draw(drawList, AccountsScrollbarTrackRect(scrollRegion), contentHeight, scrollRegion.H,
 						  ColorFadeAlpha(Color{120, 120, 128, 190}, alpha), m_flMouseX, m_flMouseY);
 }
