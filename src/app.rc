@@ -30,7 +30,7 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "Rift"
-            VALUE "FileDescription", "A Modern Riot Games Account Manager"
+            VALUE "FileDescription", "Account Manager for Riot Games"
             VALUE "FileVersion", RIFT_VERSION_STRING
             VALUE "InternalName", "Rift"
             VALUE "OriginalFilename", "Rift.exe"
