@@ -144,15 +144,33 @@ bool IsCancelled(const std::atomic<bool> *pCancelRequested)
 	return pCancelRequested != nullptr && pCancelRequested->load(std::memory_order_relaxed);
 }
 
+constexpr std::uint32_t kResponsiveProbeTimeoutMs = 750;
+
+// Whether hWnd's owning thread is actually pumping messages right now - the standard WM_NULL
+// hung-app probe. AttachThreadInput below, and the SetForegroundWindow/SetFocus calls after it,
+// all block on the target thread with no timeout, and AttachThreadInput is documented to hang the
+// caller outright against a thread that isn't processing messages. The Riot Client's window
+// exists (and matches by title) seconds before its Electron UI thread starts pumping, so probing
+// first is what keeps a slow client slow instead of wedging us.
+bool IsWindowResponsive(HWND hWnd, std::uint32_t timeoutMs)
+{
+	DWORD_PTR probeResult = 0;
+	return SendMessageTimeoutW(hWnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, timeoutMs, &probeResult) != 0;
+}
+
 // Shared by BringToForeground/SetKeyboardFocus: temporarily attaches this thread's input queue
 // to hWnd's owning thread's, since Windows otherwise silently ignores SetForegroundWindow/
 // SetFocus calls aimed at a window from a thread that isn't already part of the foreground
 // thread's input queue (the SPI_FOREGROUNDLOCKTIMEOUT policy). RAII so every early-return below
-// still detaches.
+// still detaches. Skips attaching to an unresponsive target - see IsWindowResponsive: not
+// attaching just means the client may not come to the front, which callers already tolerate.
 class ScopedThreadInputAttach {
   public:
 	explicit ScopedThreadInputAttach(HWND hWnd)
 	{
+		if (!IsWindowResponsive(hWnd, kResponsiveProbeTimeoutMs)) {
+			return;
+		}
 		m_targetThreadId = GetWindowThreadProcessId(hWnd, nullptr);
 		m_currentThreadId = GetCurrentThreadId();
 		if (m_targetThreadId != 0 && m_targetThreadId != m_currentThreadId) {
@@ -345,33 +363,34 @@ CUiElement CRiotClient::CurrentWindowElement(const CUiAutomation &uiAutomation) 
 	return uiAutomation.ElementFromWindow(hWnd);
 }
 
-bool CRiotClient::WaitForWindow(std::uint32_t timeoutMs, const std::atomic<bool> *pCancelRequested) const
+HWND CRiotClient::WaitForResponsiveClientWindow(std::uint32_t timeoutMs,
+											   const std::atomic<bool> *pCancelRequested) const
 {
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
 	for (;;) {
-		if (FindClientWindow() != nullptr) {
-			return true;
+		// Both halves every iteration - "exists but not pumping yet" is the normal state for the
+		// first seconds of a cold client start, and the one callers must not act on.
+		const HWND hWnd = FindClientWindow();
+		if (hWnd != nullptr && IsWindowResponsive(hWnd, kResponsiveProbeTimeoutMs)) {
+			return hWnd;
 		}
 		if (IsCancelled(pCancelRequested) || std::chrono::steady_clock::now() >= deadline) {
-			return false;
+			return nullptr;
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 }
 
+bool CRiotClient::WaitForWindow(std::uint32_t timeoutMs, const std::atomic<bool> *pCancelRequested) const
+{
+	return WaitForResponsiveClientWindow(timeoutMs, pCancelRequested) != nullptr;
+}
+
 bool CRiotClient::BringToForeground(std::uint32_t timeoutMs, const std::atomic<bool> *pCancelRequested) const
 {
-	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-	HWND hWnd = nullptr;
-	for (;;) {
-		hWnd = FindClientWindow();
-		if (hWnd != nullptr) {
-			break;
-		}
-		if (IsCancelled(pCancelRequested) || std::chrono::steady_clock::now() >= deadline) {
-			return false;
-		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	const HWND hWnd = WaitForResponsiveClientWindow(timeoutMs, pCancelRequested);
+	if (hWnd == nullptr) {
+		return false;
 	}
 
 	const ScopedThreadInputAttach attach(hWnd);
@@ -387,17 +406,9 @@ bool CRiotClient::BringToForeground(std::uint32_t timeoutMs, const std::atomic<b
 
 bool CRiotClient::SetKeyboardFocus(std::uint32_t timeoutMs, const std::atomic<bool> *pCancelRequested) const
 {
-	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-	HWND hWnd = nullptr;
-	for (;;) {
-		hWnd = FindClientWindow();
-		if (hWnd != nullptr) {
-			break;
-		}
-		if (IsCancelled(pCancelRequested) || std::chrono::steady_clock::now() >= deadline) {
-			return false;
-		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	const HWND hWnd = WaitForResponsiveClientWindow(timeoutMs, pCancelRequested);
+	if (hWnd == nullptr) {
+		return false;
 	}
 
 	const ScopedThreadInputAttach attach(hWnd);

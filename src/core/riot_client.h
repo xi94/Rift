@@ -234,6 +234,12 @@ class CRiotClient {
 	// doesn't match (a future client version, a different locale).
 	HWND FindClientWindow() const;
 
+	// FindClientWindow, polled until the window exists AND its owning thread is actually pumping
+	// messages - the shared front half of WaitForWindow/BringToForeground/SetKeyboardFocus.
+	// nullptr on timeout or cancellation. See IsWindowResponsive in the .cpp for why the
+	// responsiveness half isn't optional.
+	HWND WaitForResponsiveClientWindow(std::uint32_t timeoutMs, const std::atomic<bool> *pCancelRequested) const;
+
 	// FindClientWindow, wrapped as a CUiAutomation element via the caller-supplied
 	// uiAutomation - CUiElement{} (invalid) if no window currently exists. Always resolved
 	// fresh from the current HWND, never cached, for the same reason FindClientWindow itself
