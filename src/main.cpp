@@ -328,7 +328,7 @@ int main(int argc, char *argv[])
 	}
 
 	CWindow window;
-	if (!window.Create(L"Rift", 1280, 720)) {
+	if (!window.Create(L"Rift", 1000, 600)) {
 		std::println("Failed to create window.");
 		return 1;
 	}
@@ -797,7 +797,11 @@ int main(int argc, char *argv[])
 
 		stack.SetRealMousePosition(mouseX, mouseY);
 		stack.Update(deltaSeconds);
-		window.SetCursorKind(stack.GetDesiredCursor());
+		// Skipped over the resize border: forcing the app cursor there every frame would
+		// fight the OS's own resize arrows, which WM_SETCURSOR already sets correctly.
+		if (!window.IsMouseOverResizeBorder()) {
+			window.SetCursorKind(stack.GetDesiredCursor());
+		}
 
 		// Joins a finished worker exactly once it's actually done (see CUpdater::Update's
 		// own comment) - safe, and necessary, to call every frame regardless of whether

@@ -182,6 +182,18 @@ class CWindow {
 	// same answer itself between calls to this.
 	void SetCursorKind(ECursorKind kind);
 
+	// True if the mouse is currently over the resize-border strip (see HitTestResizeEdges
+	// in the .cpp) - kept up to date by WM_NCHITTEST itself, not recomputed from polled
+	// mouse position: once the cursor crosses into that strip it's non-client, so Windows
+	// stops sending WM_MOUSEMOVE (sends WM_NCMOUSEMOVE instead) and the polled position
+	// this window otherwise tracks goes stale right at the one moment it matters. The main
+	// loop skips its per-frame SetCursorKind call while this is true, so it doesn't fight
+	// the OS's own resize cursor there.
+	bool IsMouseOverResizeBorder() const
+	{
+		return m_bMouseOverResizeBorder;
+	}
+
 	// Which title bar button (if any) contains the given client-space (logical) point.
 	ETitleBarButton TitleBarHitTest(float clientX, float clientY) const;
 
@@ -227,6 +239,10 @@ class CWindow {
 	bool m_bMouseCaptured = false;
 	float m_flLastMouseX = 0.0f;
 	float m_flLastMouseY = 0.0f;
+
+	// See IsMouseOverResizeBorder - set from WM_NCHITTEST, the one message that still fires
+	// while the cursor is over this strip.
+	bool m_bMouseOverResizeBorder = false;
 
 	ResizeCallback m_pResizeCallback = nullptr;
 	void *m_pResizeCallbackUserData = nullptr;

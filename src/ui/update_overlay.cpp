@@ -36,10 +36,11 @@ constexpr Color kColorBackdrop{8, 8, 10, 200}; // semi-transparent, unlike CUnlo
 // rather than a manifest author's free-form text, so they're wrapped in place instead
 // (kMaxMessageLines below) without needing a whole scroll region for what's realistically
 // never going to be more than a line or two.
-constexpr float kNotesBoxOffsetY = 96.0f; // from the card's own top - past the title + version subtitle
 constexpr float kNotesBoxPadding = 12.0f;
 constexpr float kNotesScrollbarMargin = 14.0f; // reserved on the box's right edge - text never wraps into it
-constexpr std::uint32_t kMaxNotesLines = 40;
+// Was 40 - too tight for a long note, since WrapText silently drops lines past the cap and
+// the scroll box's max offset stopped short of the note's real end.
+constexpr std::uint32_t kMaxNotesLines = 256;
 constexpr std::uint32_t kMaxMessageLines = 4;
 
 Rect CardRect(float windowW, float windowH, float cardHeight)
@@ -58,14 +59,25 @@ Rect PrimaryButtonRect(Rect card)
 			   kButtonHeight};
 }
 
+// Just past where the title + subtitle lines actually end, so the box's top can't drift out
+// of sync with them (e.g. at a different Settings Font Size).
+float NotesBoxTopY(Rect card, const CFontManager &fonts)
+{
+	const CFont &body = fonts.GetBody();
+	const CFont &secondary = fonts.GetSecondary();
+	const float titleBaselineY = card.Y + kCardPadding + body.GetAscent();
+	const float subtitleBaselineY = titleBaselineY + body.GetLineHeight() + 10.0f + secondary.GetAscent();
+	return subtitleBaselineY + secondary.GetDescent() + kGap;
+}
+
 // The release-notes scroll box - from just past the title/version lines down to just above
 // the primary button, so its height (and therefore how much scrolls vs. how much always
 // fits) is whatever's left over, not a hand-tuned number that could drift out of sync with
 // the button's own position.
-Rect NotesBoxRect(Rect card)
+Rect NotesBoxRect(Rect card, const CFontManager &fonts)
 {
 	const Rect button = PrimaryButtonRect(card);
-	const float top = card.Y + kNotesBoxOffsetY;
+	const float top = NotesBoxTopY(card, fonts);
 	const float bottom = button.Y - kGap;
 	return Rect{card.X + kCardPadding, top, card.W - kCardPadding * 2.0f, bottom - top};
 }
@@ -304,7 +316,7 @@ bool CUpdateOverlay::OnPointerDown(float x, float y)
 	if (m_updater.GetStage() == EUpdateStage::UPDATE_STAGE_AVAILABLE) {
 		const auto windowW = static_cast<float>(m_window.GetWidth());
 		const auto windowH = static_cast<float>(m_window.GetHeight());
-		const Rect box = NotesBoxRect(CardRect(windowW, windowH, kCardHeight));
+		const Rect box = NotesBoxRect(CardRect(windowW, windowH, kCardHeight), m_fonts);
 
 		const CFont &secondary = m_fonts.GetSecondary();
 		CStringView lines[kMaxNotesLines];
@@ -327,7 +339,7 @@ bool CUpdateOverlay::OnPointerMove(float x, float y)
 	if (m_notesScroll.IsDragging()) {
 		const auto windowW = static_cast<float>(m_window.GetWidth());
 		const auto windowH = static_cast<float>(m_window.GetHeight());
-		const Rect box = NotesBoxRect(CardRect(windowW, windowH, kCardHeight));
+		const Rect box = NotesBoxRect(CardRect(windowW, windowH, kCardHeight), m_fonts);
 
 		const CFont &secondary = m_fonts.GetSecondary();
 		CStringView lines[kMaxNotesLines];
@@ -350,7 +362,7 @@ bool CUpdateOverlay::OnScroll(float x, float y, float wheelDelta)
 	if (m_updater.GetStage() == EUpdateStage::UPDATE_STAGE_AVAILABLE) {
 		const auto windowW = static_cast<float>(m_window.GetWidth());
 		const auto windowH = static_cast<float>(m_window.GetHeight());
-		const Rect box = NotesBoxRect(CardRect(windowW, windowH, kCardHeight));
+		const Rect box = NotesBoxRect(CardRect(windowW, windowH, kCardHeight), m_fonts);
 
 		if (RectContainsPoint(box, x, y)) {
 			const CFont &secondary = m_fonts.GetSecondary();
@@ -472,7 +484,7 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 					 m_updater.GetManifest().szVersion);
 		DrawText(drawList, secondary, contentX, cursorY, StringViewFromCString(lineBuffer), kColorTextDim);
 
-		const Rect box = NotesBoxRect(card);
+		const Rect box = NotesBoxRect(card, m_fonts);
 		drawList.AddRectRoundedFilled(box.X, box.Y, box.W, box.H, CDrawList::UniformRadii(8.0f),
 									  Color{22, 22, 25, 255});
 

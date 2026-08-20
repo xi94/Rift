@@ -352,6 +352,10 @@ LRESULT CWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 			const POINT cursorScreen{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
 
 			const LRESULT edgeHit = HitTestResizeEdges(m_hWnd, cursorScreen, GetDpiForWindow(m_hWnd));
+			// Recorded here, not derived from polled mouse position elsewhere: once the
+			// cursor is over this strip it's non-client, so WM_MOUSEMOVE stops firing and
+			// this is the only message left that still tracks it every move.
+			m_bMouseOverResizeBorder = edgeHit != HTNOWHERE;
 			if (edgeHit != HTNOWHERE) {
 				return edgeHit;
 			}

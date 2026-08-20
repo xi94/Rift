@@ -18,13 +18,15 @@ namespace {
 constexpr float kOpenEaseRate = 14.0f;
 
 // The panel is clamped to a fixed max size (not a fraction of the window) so it
-// doesn't balloon on a large/1440p+ monitor. 900x600 (~1.5 aspect); kPanelMaxSizeScale
-// grows both in lockstep with a larger Font Size setting so bigger text gets more room
-// instead of being squeezed/clipped into the original size.
-constexpr float kPanelMaxWidthBase = 900.0f;
-constexpr float kPanelMaxHeightBase = 600.0f;
+// doesn't balloon on a large/1440p+ monitor. Width stayed at 810; height is shorter
+// than a plain 1.5 aspect would give (480, not 540) - a flatter panel that takes up
+// less vertical space. kPanelMaxSizeScale grows both in lockstep with a larger Font
+// Size setting so bigger text gets more room instead of being squeezed/clipped into
+// the original size.
+constexpr float kPanelMaxWidthBase = 810.0f;
+constexpr float kPanelMaxHeightBase = 480.0f;
 // Real baked pixels matching the default Settings Font Size of 16 nominal units - the
-// 900x600 base was tuned at that default.
+// panel's base size was tuned at that default.
 constexpr float kReferenceBodyPixelHeight = 24.0f;
 constexpr float kPanelMargin = 48.0f;	// never closer than this to the window edge
 constexpr float kPanelScaleMin = 0.92f; // starting scale of the "pop in" animation
@@ -51,10 +53,10 @@ constexpr float kLoginButtonMargin = 16.0f;
 // The "visible in N games" chip's own icon + count number - see VisibilityChipRect and
 // DrawEditAccount, the one place both its size and its drawing are computed, so they
 // can't disagree about how wide the chip needs to be to fit its own content.
-constexpr float kVisibilityChipIconSize = 26.0f;
-constexpr float kVisibilityChipIconInset = 6.0f;
-constexpr float kVisibilityChipIconGap = 6.0f;
-constexpr float kVisibilityChipRightPadding = 12.0f;
+constexpr float kVisibilityChipIconSize = 20.0f;
+constexpr float kVisibilityChipIconInset = 12.0f;
+constexpr float kVisibilityChipIconGap = 8.0f;
+constexpr float kVisibilityChipRightPadding = 16.0f;
 
 float PanelMaxSizeScale(const CFontManager &fonts)
 {
@@ -77,6 +79,14 @@ std::uint32_t VisibleGameCountFromMask(std::uint16_t mask)
 		}
 	}
 	return count;
+}
+
+// "1 game" / "N games" - shared by VisibilityChipRect (sizing) and DrawEditAccount (drawing).
+std::uint64_t FormatVisibleGameCountText(std::uint16_t mask, char *pOut, std::size_t outCapacity)
+{
+	const std::uint32_t count = VisibleGameCountFromMask(mask);
+	const int written = std::snprintf(pOut, outCapacity, "%u %s", count, count == 1 ? "game" : "games");
+	return written > 0 ? static_cast<std::uint64_t>(written) : 0;
 }
 
 float RowHeightFor(const CFontManager &fonts)
@@ -442,18 +452,20 @@ Rect CAccountModal::EditFieldInputRect(Rect block) const
 // layout avoids entirely.
 Rect CAccountModal::VisibilityChipRect(Rect right, float yOffset) const
 {
+	// Same input-row band as EditFieldInputRect - reads as a real field, label and all
+	// (see DrawEditAccount), not a stray icon in the block's empty label row.
 	const Rect block = EditFieldBlockRect(right, 3, yOffset);
-	const float height = RowButtonSizeFor(m_fonts) + 8.0f; // matches the icon's own bump - see kVisibilityChipIconSize
+	const float labelHeight = m_fonts.GetSecondary().GetLineHeight();
+	const float y = block.Y + labelHeight + kEditFieldLabelGap;
+	const float height = EditFieldInputHeightFor(m_fonts);
 
-	char countBuffer[4];
-	const int written =
-		std::snprintf(countBuffer, sizeof(countBuffer), "%u", VisibleGameCountFromMask(m_gameSelect.GetMask()));
-	const CStringView countText{countBuffer, written > 0 ? static_cast<std::uint64_t>(written) : 0};
-	const float countTextW = TextWidth(m_fonts.GetSecondary(), countText);
+	char countBuffer[16];
+	const std::uint64_t countLen = FormatVisibleGameCountText(m_gameSelect.GetMask(), countBuffer, sizeof(countBuffer));
+	const float countTextW = TextWidth(m_fonts.GetSecondary(), CStringView{countBuffer, countLen});
 
 	const float width = kVisibilityChipIconInset + kVisibilityChipIconSize + kVisibilityChipIconGap + countTextW +
 						kVisibilityChipRightPadding;
-	return Rect{block.X, block.Y, width, height};
+	return Rect{block.X, y, width, height};
 }
 
 // Save reuses LoginButtonRect's exact geometry so the primary action always lands in the
@@ -1157,7 +1169,9 @@ void CAccountModal::DrawAddAccountButton(CDrawList &drawList, Rect right, std::u
 void CAccountModal::DrawAccountRow(CDrawList &drawList, Rect right, Rect row, const CAccount &account, bool isSelected,
 								   std::uint8_t alpha) const
 {
-	const Rect hoverRect{row.X - 8.0f, row.Y - 6.0f, row.W + 16.0f, row.H - 4.0f};
+	// Inset, not bled past row.Y - kept the top row's highlight from getting clipped by the
+	// scroll region above it.
+	const Rect hoverRect{row.X - 8.0f, row.Y + 3.0f, row.W + 16.0f, row.H - 6.0f};
 	const bool hoverRow = !isSelected && RectContainsPoint(hoverRect, m_flMouseX, m_flMouseY);
 
 	if (isSelected) {
@@ -1166,7 +1180,7 @@ void CAccountModal::DrawAccountRow(CDrawList &drawList, Rect right, Rect row, co
 		// selected" without overpowering the row's own content.
 		drawList.AddRectRoundedFilled(hoverRect.X, hoverRect.Y, hoverRect.W, hoverRect.H,
 									  CDrawList::UniformRadii(10.0f), ColorFadeAlpha(Color{58, 58, 62, 255}, alpha));
-		drawList.AddRectRoundedFilled(right.X + 8.0f, row.Y - 1.0f, 3.0f, row.H - 6.0f, CDrawList::UniformRadii(1.5f),
+		drawList.AddRectRoundedFilled(right.X + 8.0f, hoverRect.Y, 3.0f, hoverRect.H, CDrawList::UniformRadii(1.5f),
 									  ColorFadeAlpha(m_settings.m_clrAccent, alpha));
 	} else if (hoverRow) {
 		drawList.AddRectRoundedFilled(hoverRect.X, hoverRect.Y, hoverRect.W, hoverRect.H,
@@ -1175,10 +1189,23 @@ void CAccountModal::DrawAccountRow(CDrawList &drawList, Rect right, Rect row, co
 
 	const CFont &body = m_fonts.GetBody();
 	const CFont &secondary = m_fonts.GetSecondary();
-	const float usernameBaselineY = row.Y + kRowTopPadding + body.GetAscent();
-	const float noteBaselineY = row.Y + kRowTopPadding + body.GetLineHeight() + kRowLineGap + secondary.GetAscent();
+	const CStringView note = account.GetNote();
+
+	// Center the username (plus note below it, if there is one) vertically in the row.
+	float usernameBaselineY;
+	float noteBaselineY = 0.0f;
+	if (note.Length > 0) {
+		const float blockHeight = body.GetLineHeight() + kRowLineGap + secondary.GetLineHeight();
+		const float blockY = row.Y + (row.H - blockHeight) * 0.5f;
+		usernameBaselineY = blockY + body.GetAscent();
+		noteBaselineY = blockY + body.GetLineHeight() + kRowLineGap + secondary.GetAscent();
+	} else {
+		usernameBaselineY = row.Y + (row.H - body.GetLineHeight()) * 0.5f + body.GetAscent();
+	}
 	DrawText(drawList, body, row.X, usernameBaselineY, account.GetUsername(), ColorFadeAlpha(kColorTextBright, alpha));
-	DrawText(drawList, secondary, row.X, noteBaselineY, account.GetNote(), ColorFadeAlpha(kColorTextDim, alpha));
+	if (note.Length > 0) {
+		DrawText(drawList, secondary, row.X, noteBaselineY, note, ColorFadeAlpha(kColorTextDim, alpha));
+	}
 
 	drawList.AddRectFilled(row.X, row.Y + row.H - 1.0f, row.W, 1.0f, ColorFadeAlpha(Color{48, 48, 53, 255}, alpha));
 
@@ -1361,26 +1388,33 @@ void CAccountModal::DrawEditAccount(CDrawList &drawList, Rect right, std::uint8_
 	// A pill (icon + its own visible-game count, plain dim/bright text - no colored
 	// badge, no absolute-positioned overlay) - see VisibilityChipRect for why it's sized
 	// to fit that content exactly, and kVisibilityChipIconSize's own comment for why the
-	// icon itself stays a fixed size regardless.
+	// icon itself stays a fixed size regardless. No label above it (unlike Username/Note/
+	// Password) - "N games" already says what this is on its own.
 	const Rect chip = VisibilityChipRect(right, formOffsetY);
 	const bool hoverChip = RectContainsPoint(chip, m_flMouseX, m_flMouseY);
-	if (hoverChip) {
-		CHoverable::DrawLift(drawList, chip, chip.H * 0.5f, m_settings.m_clrAccent, alpha);
-		drawList.AddRectRoundedFilled(chip.X, chip.Y, chip.W, chip.H, CDrawList::UniformRadii(chip.H * 0.5f),
-									  ColorFadeAlpha(Color{56, 56, 62, 255}, alpha));
-	}
+
+	// Always has a real border+fill, like the other fields' own unfocused state - a
+	// resting chip that's only visible on hover is exactly what made this hard to notice.
+	constexpr Color kChipBorder{46, 46, 52, 255};
+	constexpr Color kChipFill{24, 24, 27, 255};
+	constexpr Color kChipHoverBorder{225, 225, 230, 255};
+	constexpr Color kChipHoverFill{42, 42, 46, 255};
+	drawList.AddRectRoundedFilled(chip.X, chip.Y, chip.W, chip.H, CDrawList::UniformRadii(8.0f),
+								  ColorFadeAlpha(hoverChip ? kChipHoverBorder : kChipBorder, alpha));
+	drawList.AddRectRoundedFilled(chip.X + 1.5f, chip.Y + 1.5f, chip.W - 3.0f, chip.H - 3.0f,
+								  CDrawList::UniformRadii(7.0f),
+								  ColorFadeAlpha(hoverChip ? kChipHoverFill : kChipFill, alpha));
 
 	const Rect icon{chip.X + kVisibilityChipIconInset, chip.Y + (chip.H - kVisibilityChipIconSize) * 0.5f,
 					kVisibilityChipIconSize, kVisibilityChipIconSize};
 	drawList.AddRectRoundedTextured(icon.X, icon.Y, icon.W, icon.H, kCornerRadiiNone, m_assets.GetIconListArrow(),
 									ColorFadeAlpha(hoverChip ? kColorTextBright : kColorTextDim, alpha));
 
-	char countBuffer[4];
-	const int written =
-		std::snprintf(countBuffer, sizeof(countBuffer), "%u", VisibleGameCountFromMask(m_gameSelect.GetMask()));
-	const CStringView countText{countBuffer, written > 0 ? static_cast<std::uint64_t>(written) : 0};
+	char countBuffer[16];
+	const std::uint64_t countLen = FormatVisibleGameCountText(m_gameSelect.GetMask(), countBuffer, sizeof(countBuffer));
+	const CStringView countText{countBuffer, countLen};
 	const CFont &countFont = m_fonts.GetSecondary();
-	// Baseline for the number's own visual center (not just its ascent) to land on the
+	// Baseline for the text's own visual center (not just its ascent) to land on the
 	// chip's true center, matching where the icon (a plain box, centered by its own
 	// bounds) sits - see settings_menu.cpp's own comment on this same ascent/descent
 	// math for why GetAscent() alone isn't enough.
