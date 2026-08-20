@@ -12,12 +12,18 @@
 #include "core/ui_automation.h"
 
 namespace {
-// Generous - a cold Electron start (the Riot Client's own multi-process launch, confirmed
-// slow-ish against a real install) is the single biggest source of latency in this whole
-// flow, and a timeout here means "tell the user it failed", not "wait a little longer" - see
-// core/riot_client.h's own file comment on why a fresh worker thread doesn't get another
-// chance to retry within the same attempt.
-constexpr std::uint32_t kLaunchTimeoutMs = 20000;
+// Waiting for the freshly launched Riot Client's own window is deliberately unbounded (see
+// CRiotClient::kWaitForeverMs), unlike every other step here. A cold Electron start (the Riot
+// Client's own multi-process launch, confirmed slow-ish against a real install) is the single
+// biggest source of latency in this whole flow, and how slow it actually is depends on the
+// machine, its disk, and whether the client decides to patch itself first - so any number
+// picked here is really a guess at someone else's hardware, and getting it wrong means telling
+// a user their login failed while the client they asked for is still visibly starting up in
+// front of them. Everything past this point is a step that either lands quickly or is genuinely
+// broken, so those keep their timeouts; this one is bounded by the user's own Cancel instead,
+// which is live for the whole wait (the modal's Login button reads "Cancel" while an attempt is
+// in flight - see ui/account_modal.cpp) and interrupts it within a poll interval. Note
+// CLoginAttempt::Update's watchdog deliberately doesn't measure this stage either - see there.
 constexpr std::uint32_t kFormTimeoutMs = 10000;
 constexpr std::uint32_t kResultTimeoutMs = 6000;
 
@@ -53,13 +59,13 @@ constexpr const char *kFormTimeoutMessage = "Couldn't find the Riot Client's log
 constexpr const char *kUnresponsiveClientMessage = "The Riot Client stopped responding - try again.";
 
 // The watchdog CLoginAttempt::Update measures a whole attempt against. Deliberately loose - every
-// step already has its own timeout, so blowing this means the worker is blocked somewhere that
-// has none, and a false positive would abandon a login that was actually working. Summed from the
-// individual budgets (the doubled group is the one retry-without-relaunch path) so tuning any of
-// them can't silently make this too tight.
+// step it covers already has its own timeout, so blowing this means the worker is blocked
+// somewhere that has none, and a false positive would abandon a login that was actually working.
+// Summed from the individual budgets (the doubled group is the one retry-without-relaunch path)
+// so tuning any of them can't silently make this too tight. The unbounded wait for the client's
+// window contributes nothing to this sum on purpose - it isn't measured at all (see Update).
 constexpr std::uint32_t kWorstCaseAttemptMs =
-	kLaunchTimeoutMs + (kForegroundTimeoutMs + kFocusTimeoutMs + kFormTimeoutMs + kResultTimeoutMs) * 2 +
-	kPlayButtonTimeoutMs;
+	(kForegroundTimeoutMs + kFocusTimeoutMs + kFormTimeoutMs + kResultTimeoutMs) * 2 + kPlayButtonTimeoutMs;
 constexpr auto kWatchdogTimeout = std::chrono::milliseconds(kWorstCaseAttemptMs * 2);
 
 // How long a cancelled-but-unacknowledged worker gets before it's abandoned - see Cancel(). A
@@ -180,8 +186,11 @@ void RunLoginAttempt(SLoginAttemptState &state)
 
 	// Not just "a window exists" - CRiotClient::WaitForWindow now also holds out for its owning
 	// thread to actually be pumping messages, which is what the whole rest of this function
-	// depends on and what a cold Electron start takes its time getting to.
-	if (!state.RiotClient.WaitForWindow(kLaunchTimeoutMs, &state.bCancelRequested)) {
+	// depends on and what a cold Electron start takes its time getting to. No deadline on this
+	// one wait (see kWaitForeverMs above): false here therefore only ever means the user
+	// cancelled, which StoreCancelledOrError already lands as CANCELLED - kWindowTimeoutMessage
+	// stays as the honest fallback for the case that can no longer happen on its own.
+	if (!state.RiotClient.WaitForWindow(CRiotClient::kWaitForeverMs, &state.bCancelRequested)) {
 		StoreCancelledOrError(state, kWindowTimeoutMessage);
 		return;
 	}
@@ -427,6 +436,21 @@ void CLoginAttempt::Update()
 	if (m_pState != nullptr && m_pState->bWorkerFinished.load(std::memory_order_acquire)) {
 		JoinWithTimeoutOrDetach(m_worker, std::chrono::milliseconds(50));
 		m_bActive = false;
+		return;
+	}
+
+	// The wait for the client's window has no timeout of its own (see kWaitForeverMs's use in
+	// RunLoginAttempt), so the watchdog can't meaningfully measure that stage: a client that's
+	// merely slow to start would otherwise be abandoned as "unresponsive" at exactly the moment
+	// the user was told to keep waiting. Hold the deadline off for as long as the worker is
+	// still in it; every stage after it is bounded and stays measured as before. A requested
+	// cancel is the one thing that still runs the clock down here - Cancel()'s own grace period
+	// is what disposes of a worker too wedged to acknowledge it, and that has to keep working in
+	// this stage too, since it's now the only bound on it at all.
+	const bool bWaitingForClient = GetStage() == ELoginStage::LOGIN_STAGE_WAITING_FOR_PROCESS &&
+								   m_pState != nullptr && !m_pState->bCancelRequested.load(std::memory_order_relaxed);
+	if (bWaitingForClient) {
+		m_watchdogDeadline = std::chrono::steady_clock::now() + kWatchdogTimeout;
 		return;
 	}
 

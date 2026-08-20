@@ -152,12 +152,21 @@ class CLoginAttempt {
 	// Joins only a worker that has already signalled it finished, so the join is always
 	// effectively instantaneous; a worker past its deadline is abandoned rather than waited on
 	// (see AbandonWorker). Never blocks the caller waiting for the worker to do its work.
+	//
+	// The one stage the watchdog deliberately doesn't measure is LOGIN_STAGE_WAITING_FOR_PROCESS:
+	// its wait for the Riot Client's window is unbounded on purpose (see the .cpp), so an attempt
+	// sitting there can stay active indefinitely - Cancel() is what ends it, and the UI keeps a
+	// Cancel control live for exactly as long (see account_modal.cpp). Every stage after it is
+	// bounded and still watchdogged, and a cancel requested in that stage runs the clock down
+	// normally, so a wedged worker is still disposed of rather than waited on forever.
 	void Update();
 
   private:
 	// Gives up on a worker that has blown m_watchdogDeadline: it's blocked inside a call with no
 	// cancellation point and no timeout of its own, so no amount of further waiting brings it
-	// back. Detaches the OS thread, hands it sole ownership of the state block it's still writing
+	// back. Not to be confused with the deliberately unbounded wait for the client's window,
+	// which Update() holds this off for entirely - that one is waiting on purpose, and is
+	// interruptible. Detaches the OS thread, hands it sole ownership of the state block it's still writing
 	// into, and swaps in a fresh block already carrying the terminal result - so GetStage() reads
 	// terminal immediately, IsActive() goes false, and the very next Start() is free to run.
 	void AbandonWorker();

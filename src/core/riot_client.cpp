@@ -366,7 +366,11 @@ CUiElement CRiotClient::CurrentWindowElement(const CUiAutomation &uiAutomation) 
 HWND CRiotClient::WaitForResponsiveClientWindow(std::uint32_t timeoutMs,
 											   const std::atomic<bool> *pCancelRequested) const
 {
-	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+	// No deadline computed at all in the wait-forever case - see kWaitForeverMs. Cancellation is
+	// still checked every iteration exactly as it is for a bounded wait, so this stays
+	// interruptible rather than becoming a hang the caller can't get out of.
+	const bool bWaitForever = timeoutMs == kWaitForeverMs;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(bWaitForever ? 0 : timeoutMs);
 	for (;;) {
 		// Both halves every iteration - "exists but not pumping yet" is the normal state for the
 		// first seconds of a cold client start, and the one callers must not act on.
@@ -374,7 +378,7 @@ HWND CRiotClient::WaitForResponsiveClientWindow(std::uint32_t timeoutMs,
 		if (hWnd != nullptr && IsWindowResponsive(hWnd, kResponsiveProbeTimeoutMs)) {
 			return hWnd;
 		}
-		if (IsCancelled(pCancelRequested) || std::chrono::steady_clock::now() >= deadline) {
+		if (IsCancelled(pCancelRequested) || (!bWaitForever && std::chrono::steady_clock::now() >= deadline)) {
 			return nullptr;
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));

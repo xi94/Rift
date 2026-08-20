@@ -70,6 +70,16 @@
 
 class CRiotClient {
   public:
+	// Passed as timeoutMs to WaitForWindow to mean "no deadline at all" - poll until the window
+	// is actually there or pCancelRequested says the user gave up, however long that takes.
+	// Only that one wait honours it: every other wait here is a step that either lands quickly
+	// or is genuinely broken, whereas a cold Riot Client start is just slow, and how slow
+	// depends on a machine this can't measure ahead of time (see core/login_attempt.cpp's own
+	// comment on why the user's own Cancel is the better bound there than any number picked
+	// here). Deliberately not 0 - that reads as "don't wait at all", which is what a caller
+	// leaving a timeout uninitialized would accidentally get.
+	static constexpr std::uint32_t kWaitForeverMs = 0xFFFFFFFFu;
+
 	~CRiotClient();
 
 	// True if VALORANT's or League of Legends' own *game* process (not the Riot/League
@@ -130,7 +140,9 @@ class CRiotClient {
 	// for its own progress reporting; SubmitLogin/WaitForLoginError/BringToForeground/
 	// SetKeyboardFocus each re-resolve the current window fresh regardless of whether this was
 	// ever called. pCancelRequested, if non-null and observed true, ends the wait early
-	// (returns false) - see this file's own header comment.
+	// (returns false) - see this file's own header comment. timeoutMs may be kWaitForeverMs,
+	// in which case pCancelRequested is the only thing that ever ends this wait short of the
+	// window showing up.
 	bool WaitForWindow(std::uint32_t timeoutMs, const std::atomic<bool> *pCancelRequested = nullptr) const;
 
 	// SetForegroundWindow (with the AttachThreadInput trick actually needed to make it succeed
@@ -237,7 +249,8 @@ class CRiotClient {
 	// FindClientWindow, polled until the window exists AND its owning thread is actually pumping
 	// messages - the shared front half of WaitForWindow/BringToForeground/SetKeyboardFocus.
 	// nullptr on timeout or cancellation. See IsWindowResponsive in the .cpp for why the
-	// responsiveness half isn't optional.
+	// responsiveness half isn't optional. timeoutMs of kWaitForeverMs polls without a deadline
+	// (see that constant) - the callers that pass their own timeout are unaffected.
 	HWND WaitForResponsiveClientWindow(std::uint32_t timeoutMs, const std::atomic<bool> *pCancelRequested) const;
 
 	// FindClientWindow, wrapped as a CUiAutomation element via the caller-supplied
