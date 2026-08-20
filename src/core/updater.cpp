@@ -532,11 +532,16 @@ bool CUpdater::RunStartupRecoveryAndMaybeExit()
 		selfPath.compare(selfPath.size() - kOldSuffix.size(), kOldSuffix.size(), kOldSuffix) == 0;
 
 	if (!isOldCopy) {
-		// The overwhelmingly common case: a normal launch. A leftover "<exe>.old" sibling
-		// means a previous update's two-step fallback (see ApplyDownloadedExe) finished
-		// successfully but never got to clean up after itself - delete it now. Best-effort:
-		// an antivirus scanner transiently holding it open is not a reason to fail startup.
-		DeleteFileW((selfPath + L".old").c_str());
+		// Leftover "<exe>.old" from a previous update's two-step fallback - delete it. Retried
+		// briefly: the old process (still exiting in the background) can still hold it open for
+		// a moment after spawning this one, so a single attempt can lose that race.
+		const std::wstring oldPath = selfPath + L".old";
+		for (int attempt = 0; attempt < 20; attempt += 1) {
+			if (DeleteFileW(oldPath.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND) {
+				break;
+			}
+			Sleep(50);
+		}
 		return false;
 	}
 
