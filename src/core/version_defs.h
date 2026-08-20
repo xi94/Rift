@@ -7,8 +7,8 @@
 // substitution. This file is the one thing both sides can #include without choking on
 // the other's syntax, so the number itself only ever gets typed in one place.
 
-#define RIFT_VERSION_MAJOR 0
-#define RIFT_VERSION_MINOR 3
+#define RIFT_VERSION_MAJOR 1
+#define RIFT_VERSION_MINOR 0
 #define RIFT_VERSION_PATCH 0
 
 #define RIFT_STRINGIFY_IMPL(x) #x

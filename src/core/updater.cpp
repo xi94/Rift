@@ -17,13 +17,8 @@
 #include "core/update_signing_key.h"
 
 namespace {
-// GitHub's own stable "latest release" redirect - github.com issues an HTTPS redirect to a
-// signed objects.githubusercontent.com URL, served by GitHub's CDN, not the rate-limited
-// api.github.com REST API, so this needs no auth token and hits no rate limit. Update this
-// (and update_signing_key.h's own embedded public key, if the signing key is ever rotated)
-// if this project's repo ever moves.
-//constexpr wchar_t kManifestUrl[] = L"https://github.com/xi94/Rift/releases/latest/download/update.json";
-constexpr wchar_t kManifestUrl[] = L"https://github.com/xi94/Rift_Test/releases/latest/download/update.json";
+
+constexpr wchar_t kManifestUrl[] = L"https://github.com/xi94/Rift/releases/latest/download/update.json";
 constexpr wchar_t kUserAgent[] = L"Rift-Updater/1.0";
 
 struct HInternetHandle {
