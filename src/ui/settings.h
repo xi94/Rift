@@ -14,6 +14,14 @@
 #include "core/types.h"
 
 struct CSettings {
+	// Last known main window size (logical pixels) - main.cpp reads this before the window
+	// even exists to size it on launch, and keeps it in sync with the live window every
+	// frame so whatever save happens next (any of them - see main.cpp's own SaveNow call
+	// sites) persists whatever size the user last left it at. Defaults match this project's
+	// own shipped default size.
+	std::uint32_t m_nWindowWidth = 1042;
+	std::uint32_t m_nWindowHeight = 675;
+
 	bool m_bAnimationsEnabled = true;
 	float m_flAnimationSpeed =
 		1.0f; // multiplier on every eased animation's rate - see CAnimator::SetSpeed. 1.0 = normal speed.

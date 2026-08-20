@@ -169,6 +169,8 @@ bool CStorage::SaveSettings(const CSettings &settings, std::int32_t carouselZoom
 {
 	nlohmann::json j;
 	j["format_version"] = kFormatVersion;
+	j["window_width"] = settings.m_nWindowWidth;
+	j["window_height"] = settings.m_nWindowHeight;
 	j["animations_enabled"] = settings.m_bAnimationsEnabled;
 	j["animation_speed"] = settings.m_flAnimationSpeed;
 	j["rounded_corners_enabled"] = settings.m_bRoundedCornersEnabled;
@@ -215,6 +217,8 @@ EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &out
 		return fileExists ? EStorageLoadResult::STORAGE_LOAD_FAILED : EStorageLoadResult::STORAGE_LOAD_NO_FILE;
 	}
 
+	settings.m_nWindowWidth = j.value("window_width", settings.m_nWindowWidth);
+	settings.m_nWindowHeight = j.value("window_height", settings.m_nWindowHeight);
 	settings.m_bAnimationsEnabled = j.value("animations_enabled", settings.m_bAnimationsEnabled);
 	settings.m_flAnimationSpeed = j.value("animation_speed", settings.m_flAnimationSpeed);
 	settings.m_bRoundedCornersEnabled = j.value("rounded_corners_enabled", settings.m_bRoundedCornersEnabled);

@@ -327,8 +327,17 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	// Read just the window size ahead of everything else settings-related below (CSettings
+	// itself, the real LoadNow call) - those all need pCarousel, which doesn't exist yet,
+	// but window.Create() needs a size right now. Falls back to CSettings's own defaults
+	// (a no-op CStorage::LoadSettings, e.g. first run) rather than the old hardcoded
+	// 1042x675 literal.
+	CSettings bootSettings;
+	std::int32_t bootZoomStopUnused = 0;
+	CStorage::LoadSettings(bootSettings, bootZoomStopUnused);
+
 	CWindow window;
-	if (!window.Create(L"Rift", 1000, 600)) {
+	if (!window.Create(L"Rift", bootSettings.m_nWindowWidth, bootSettings.m_nWindowHeight)) {
 		std::println("Failed to create window.");
 		return 1;
 	}
@@ -542,6 +551,15 @@ int main(int argc, char *argv[])
 
 		const float width = static_cast<float>(window.GetWidth());
 		const float height = static_cast<float>(window.GetHeight());
+
+		// Kept live so whatever SaveSettingsNow/SaveNow call happens next persists the
+		// current size - guarded against 0 since a minimized window reports a zero client
+		// size (WM_SIZE), which would otherwise overwrite the real saved size with garbage.
+		if (window.GetWidth() > 0 && window.GetHeight() > 0) {
+			settings.m_nWindowWidth = window.GetWidth();
+			settings.m_nWindowHeight = window.GetHeight();
+		}
+
 		// CCarousel is the one widget whose whole layout derives from an externally-set
 		// m_vecBounds (see carousel.h's own file comment) - every other widget queries its
 		// own CWindow& reference directly, so nothing else needs this treatment.
