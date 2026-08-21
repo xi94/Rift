@@ -222,11 +222,13 @@ void DrawStatusBarVersion(CDrawList &drawList, CFontManager &fonts, float status
 	const CStringView versionText{versionBuffer, written > 0 ? static_cast<std::uint64_t>(written) : 0};
 
 	constexpr float kStatusBarVersionPadding = 14.0f;
-	// Same baseline-centering formula as CCarousel::DrawStatusBarContent's own comment
-	// documents, and the same dim status-bar text color, so both ends of this bar read as
-	// one consistent strip rather than two independently-tuned pieces of text.
-	const float baselineY =
-		statusBarY + statusBarHeight * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f;
+	// Same baseline-centering formula (including the empirical nudge) as
+	// CCarousel::DrawStatusBarContent's own comment documents, and the same dim status-bar
+	// text color, so both ends of this bar read as one consistent strip rather than two
+	// independently-tuned pieces of text.
+	constexpr float kBaselineVisualNudge = 2.0f;
+	const float baselineY = statusBarY + statusBarHeight * 0.5f +
+							 (secondary.GetAscent() + secondary.GetDescent()) * 0.5f - kBaselineVisualNudge;
 	DrawText(drawList, secondary, kStatusBarVersionPadding, baselineY, versionText, Color{158, 158, 166, 255});
 }
 

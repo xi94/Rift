@@ -974,6 +974,8 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 
 	drawList.PopClipRect();
 
+	m_rowsScroll.DrawEdgeFade(drawList, layout.ScrollRegion, rows.ContentHeight, layout.ScrollRegion.H,
+							  ColorFadeAlpha(kColorBg, alpha));
 	m_rowsScroll.Draw(drawList, ScrollbarTrackRect(layout.ScrollRegion), rows.ContentHeight, layout.ScrollRegion.H,
 					  ColorFadeAlpha(Color{120, 120, 128, 190}, alpha), m_flMouseX, m_flMouseY);
 

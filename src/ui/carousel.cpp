@@ -993,6 +993,20 @@ void CCarousel::DrawCarouselMode(CDrawList &drawList, std::uint8_t alpha, float 
 											  ColorFadeAlpha(Color{255, 255, 255, 255}, alpha));
 		}
 	}
+
+	// m_vecBounds spans the full window width with no side margin, so a card mid-scroll
+	// touches the window's left/right edge exactly instead of stopping short of it - a
+	// gradient strip from the window's own clear color (main.cpp's kColorBackground) down
+	// to transparent reads as an intentional vignette instead of a card visibly bleeding
+	// into the border.
+	constexpr float kEdgeFadeWidth = 64.0f;
+	constexpr Color kEdgeFadeColor{18, 18, 20, 255};
+	const Color fadeOpaque = ColorFadeAlpha(kEdgeFadeColor, alpha);
+	const Color fadeClear = ColorFadeAlpha(kEdgeFadeColor, 0);
+	drawList.AddRectGradientCorners(areaX, m_vecBounds.Y, kEdgeFadeWidth, m_vecBounds.H, fadeOpaque, fadeClear,
+									fadeOpaque, fadeClear);
+	drawList.AddRectGradientCorners(areaX + areaW - kEdgeFadeWidth, m_vecBounds.Y, kEdgeFadeWidth, m_vecBounds.H,
+									fadeClear, fadeOpaque, fadeClear, fadeOpaque);
 }
 
 void CCarousel::DrawGridMode(CDrawList &drawList, std::uint8_t alpha, float yOffset, float mouseX, float mouseY) const
@@ -1042,6 +1056,7 @@ void CCarousel::DrawGridMode(CDrawList &drawList, std::uint8_t alpha, float yOff
 	drawList.PopClipRect();
 
 	const float contentHeight = GridContentHeight();
+	m_wrapScroll.DrawEdgeFade(drawList, region, contentHeight, region.H, ColorFadeAlpha(Color{18, 18, 20, 255}, alpha));
 	m_wrapScroll.Draw(drawList, ScrollbarTrackRect(), contentHeight, region.H,
 					  ColorFadeAlpha(Color{160, 160, 168, 200}, alpha), mouseX, mouseY);
 }
@@ -1091,6 +1106,7 @@ void CCarousel::DrawListMode(CDrawList &drawList, std::uint8_t alpha, float yOff
 	drawList.PopClipRect();
 
 	const float contentHeight = ListContentHeight();
+	m_wrapScroll.DrawEdgeFade(drawList, region, contentHeight, region.H, ColorFadeAlpha(Color{18, 18, 20, 255}, alpha));
 	m_wrapScroll.Draw(drawList, ScrollbarTrackRect(), contentHeight, region.H,
 					  ColorFadeAlpha(Color{160, 160, 168, 200}, alpha), mouseX, mouseY);
 }
@@ -1137,10 +1153,14 @@ void CCarousel::DrawStatusBarContent(CDrawList &drawList) const
 	DrawModeGlyph(drawList, m_assets, m_viewMode, iconBox, Color{175, 175, 182, 255});
 
 	// Baseline for the text's own visual center (not just its ascent) to land on the
-	// status bar's true center, matching where the icon (a plain box, centered by its
-	// own bounds) sits - see settings_menu.cpp's own comment on this same ascent/descent
-	// math for why GetAscent() alone isn't enough.
-	const float baselineY = content.Y + content.H * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f;
+	// status bar's true center, matching where the icon (a plain box, centered by its own
+	// bounds) sits - see settings_menu.cpp's own comment on this same ascent/descent math
+	// and its kBaselineVisualNudge for why GetAscent() alone isn't enough, and why even
+	// ascent+descent alone still reads a couple pixels low against a plain geometrically-
+	// centered icon like this one.
+	constexpr float kBaselineVisualNudge = 2.0f;
+	const float baselineY =
+		content.Y + content.H * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f - kBaselineVisualNudge;
 	DrawText(drawList, secondary, iconBox.X + kStatusBarIconSize + kStatusBarIconGap, baselineY, text,
 			 Color{158, 158, 166, 255});
 }

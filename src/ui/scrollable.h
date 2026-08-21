@@ -60,6 +60,17 @@ class CScrollable {
 		return m_bDragging;
 	}
 
+	// Fades `area`'s content into `edgeColor` near its top/bottom edges - the vertical
+	// sibling of CCarousel::DrawCarouselMode's own horizontal edge fade, same reasoning:
+	// content scrolled up against a clip rect just gets cut off mid-row with no visual
+	// cue there's more of it, so a gradient into the area's own background color there
+	// reads as an intentional fade instead of an abrupt clip. Top fades in only once
+	// there's real content scrolled out of view above (not on an unscrolled list, which
+	// has nothing above to hint at), bottom only while there's still more below -
+	// `edgeColor` is the area's own background, alpha pre-composed by the caller same as
+	// every other primitive here.
+	void DrawEdgeFade(CDrawList &drawList, Rect area, float contentHeight, float visibleHeight, Color edgeColor) const;
+
 	float m_flScrollOffset = 0.0f;		 // animated, pixels
 	float m_flTargetScrollOffset = 0.0f; // where m_flScrollOffset eases toward
 

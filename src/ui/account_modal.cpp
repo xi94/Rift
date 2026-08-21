@@ -1327,6 +1327,8 @@ void CAccountModal::DrawAccountList(CDrawList &drawList, Rect right, std::uint8_
 	drawList.PopClipRect();
 
 	const float contentHeight = AccountsContentHeight(tops, heights, visibleCount);
+	m_accountsScroll.DrawEdgeFade(drawList, scrollRegion, contentHeight, scrollRegion.H,
+								  ColorFadeAlpha(Color{24, 24, 27, 255}, alpha));
 	m_accountsScroll.Draw(drawList, AccountsScrollbarTrackRect(scrollRegion), contentHeight, scrollRegion.H,
 						  ColorFadeAlpha(Color{120, 120, 128, 190}, alpha), m_flMouseX, m_flMouseY);
 }

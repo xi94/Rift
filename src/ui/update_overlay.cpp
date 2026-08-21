@@ -505,6 +505,7 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 		}
 		drawList.PopClipRect();
 
+		m_notesScroll.DrawEdgeFade(drawList, box, contentHeight, box.H, Color{22, 22, 25, 255});
 		m_notesScroll.Draw(drawList, NotesScrollbarTrackRect(box), contentHeight, box.H,
 						   Color{120, 120, 128, 190}, m_flMouseX, m_flMouseY);
 

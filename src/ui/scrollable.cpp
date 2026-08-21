@@ -7,6 +7,7 @@
 
 namespace {
 constexpr float kScrollableEaseRate = 16.0f;
+constexpr float kEdgeFadeHeight = 28.0f;
 
 float MaxScroll(float contentHeight, float visibleHeight)
 {
@@ -105,4 +106,37 @@ void CScrollable::OnScroll(float wheelDelta, float contentHeight, float visibleH
 	const float maxOffset = MaxScroll(contentHeight, visibleHeight);
 	m_flTargetScrollOffset =
 		std::clamp(m_flTargetScrollOffset - wheelDelta * kScrollbarWheelPixelsPerNotch, 0.0f, maxOffset);
+}
+
+void CScrollable::DrawEdgeFade(CDrawList &drawList, Rect area, float contentHeight, float visibleHeight,
+							   Color edgeColor) const
+{
+	if (!IsVisible(contentHeight, visibleHeight)) {
+		return; // nothing clipped in either direction - nothing to hint at
+	}
+
+	const float fadeHeight = std::min(kEdgeFadeHeight, area.H * 0.5f);
+	const Color clear = ColorFadeAlpha(edgeColor, 0);
+	const float maxOffset = MaxScroll(contentHeight, visibleHeight);
+
+	// The row content above/below this area is clipped to `area` by the caller's own
+	// separate PushClipRect - if that clip and this fade's own geometry land on slightly
+	// different physical pixels (a rounding difference between the GPU scissor rect and
+	// vertex positions), a sliver of unfaded content shows through right at the edge. A
+	// solid strip of the same opaque edgeColor overshooting a few pixels past area's own
+	// top/bottom - clipped away by the PushClipRect below in the ordinary case - closes
+	// that gap regardless of which way the rounding goes, without touching the real
+	// gradient's own slope (which still starts exactly on area's edge).
+	constexpr float kOvershoot = 4.0f;
+	drawList.PushClipRect(area);
+	if (m_flScrollOffset > 0.5f) {
+		drawList.AddRectFilled(area.X, area.Y - kOvershoot, area.W, kOvershoot, edgeColor);
+		drawList.AddRectGradientCorners(area.X, area.Y, area.W, fadeHeight, edgeColor, edgeColor, clear, clear);
+	}
+	if (m_flScrollOffset < maxOffset - 0.5f) {
+		drawList.AddRectGradientCorners(area.X, area.Y + area.H - fadeHeight, area.W, fadeHeight, clear, clear,
+										edgeColor, edgeColor);
+		drawList.AddRectFilled(area.X, area.Y + area.H, area.W, kOvershoot, edgeColor);
+	}
+	drawList.PopClipRect();
 }
