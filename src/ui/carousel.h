@@ -154,6 +154,14 @@ class CCarousel : public CWidget {
 	// play for other persisted settings a coordinating owner applies right after load.
 	void ApplyZoomStop(std::int32_t stop);
 
+	// Snaps Carousel mode's centered banner directly to `index`, no easing - the same
+	// "apply a persisted value before the first frame" role ApplyZoomStop plays just
+	// above, for the banner CStorage's Load remembers Carousel mode was last centered on.
+	// Independent of whichever view mode ApplyZoomStop above restores: Grid/List never
+	// touch m_flScrollOffset/m_flTargetScrollOffset, so this is exactly the value Carousel
+	// mode resumes on whenever the user next zooms/switches back into it.
+	void ApplySelectedIndex(std::int32_t index);
+
 	std::int32_t GetZoomStop() const
 	{
 		return m_nZoomStop;

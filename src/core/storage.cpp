@@ -165,7 +165,8 @@ bool CStorage::GetDataDirectory(char *pBuffer, std::size_t bufferSize)
 	return GetStorageDirectory(pBuffer, bufferSize);
 }
 
-bool CStorage::SaveSettings(const CSettings &settings, std::int32_t carouselZoomStop)
+bool CStorage::SaveSettings(const CSettings &settings, std::int32_t carouselZoomStop,
+							std::int32_t carouselSelectedBanner)
 {
 	nlohmann::json j;
 	j["format_version"] = kFormatVersion;
@@ -181,6 +182,7 @@ bool CStorage::SaveSettings(const CSettings &settings, std::int32_t carouselZoom
 	j["font_name"] = std::string(settings.m_szFontName);
 	j["exclude_account_list_from_capture"] = settings.m_bExcludeAccountListFromCapture;
 	j["carousel_zoom_stop"] = carouselZoomStop;
+	j["carousel_selected_banner"] = carouselSelectedBanner;
 
 	// Not itself secret - see this file's own header comment on why settings.json is
 	// never encrypted at the file level.
@@ -199,7 +201,8 @@ bool CStorage::SaveSettings(const CSettings &settings, std::int32_t carouselZoom
 	return GetStorageFilePath(kSettingsFileName, path, sizeof(path)) && WriteTextFile(path, j.dump(2));
 }
 
-EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &outCarouselZoomStop)
+EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &outCarouselZoomStop,
+										  std::int32_t &outCarouselSelectedBanner)
 {
 	char path[MAX_PATH];
 	if (!GetStorageFilePath(kSettingsFileName, path, sizeof(path))) {
@@ -240,6 +243,7 @@ EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &out
 	settings.m_bExcludeAccountListFromCapture =
 		j.value("exclude_account_list_from_capture", settings.m_bExcludeAccountListFromCapture);
 	outCarouselZoomStop = j.value("carousel_zoom_stop", outCarouselZoomStop);
+	outCarouselSelectedBanner = j.value("carousel_selected_banner", outCarouselSelectedBanner);
 
 	settings.m_bMasterPasswordEnabled = false;
 	if (j.contains("master_password") && j["master_password"].is_object()) {

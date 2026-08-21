@@ -92,10 +92,11 @@ class CStorage {
 	static bool SaveAccounts(CBanner *pBanners, std::uint32_t bannerCount, bool masterPasswordEnabled,
 							 const CMasterKey &masterKey);
 
-	// Snapshots settings/zoomStop as plain JSON and atomically writes them to
-	// settings.json. Independent of SaveAccounts - a plain settings change never touches
-	// accounts.vault.
-	static bool SaveSettings(const CSettings &settings, std::int32_t carouselZoomStop);
+	// Snapshots settings/zoomStop/selectedBanner as plain JSON and atomically writes them
+	// to settings.json. Independent of SaveAccounts - a plain settings change never
+	// touches accounts.vault.
+	static bool SaveSettings(const CSettings &settings, std::int32_t carouselZoomStop,
+							 std::int32_t carouselSelectedBanner);
 
 	// Requires masterKey.m_bEnabled (returns STORAGE_LOAD_LOCKED immediately, touching
 	// neither the file nor pBanners, otherwise). Reads + decrypts accounts.vault (falling
@@ -108,9 +109,11 @@ class CStorage {
 										   const CMasterKey &masterKey);
 
 	// Reads settings.json (falling back to its .bak on failure) into settings/
-	// outCarouselZoomStop - never encrypted, so no key is needed. A key genuinely absent
-	// from the file (an older save, before some field existed) just leaves that one field
-	// at whatever settings/outCarouselZoomStop already held going in - see this file's own
-	// header comment for why that per-field tolerance is the entire point of this format.
-	static EStorageLoadResult LoadSettings(CSettings &settings, std::int32_t &outCarouselZoomStop);
+	// outCarouselZoomStop/outCarouselSelectedBanner - never encrypted, so no key is
+	// needed. A key genuinely absent from the file (an older save, before some field
+	// existed) just leaves that one field at whatever it already held going in - see this
+	// file's own header comment for why that per-field tolerance is the entire point of
+	// this format.
+	static EStorageLoadResult LoadSettings(CSettings &settings, std::int32_t &outCarouselZoomStop,
+										   std::int32_t &outCarouselSelectedBanner);
 };

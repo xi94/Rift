@@ -618,6 +618,13 @@ void CCarousel::ApplyZoomStop(std::int32_t stop)
 	m_flTransitionAmount = 0.0f;
 }
 
+void CCarousel::ApplySelectedIndex(std::int32_t index)
+{
+	const float target = ClampTarget(static_cast<float>(index));
+	m_flScrollOffset = target;
+	m_flTargetScrollOffset = target;
+}
+
 bool CCarousel::ModeSwitcherOnPointerDown(float x, float y)
 {
 	if (!IsModeSwitcherVisible()) {

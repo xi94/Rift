@@ -73,7 +73,7 @@ void SaveAccountsNow(CCarousel &carousel, const CSettings &settings, const CMast
 
 void SaveSettingsNow(const CCarousel &carousel, const CSettings &settings)
 {
-	CStorage::SaveSettings(settings, carousel.GetZoomStop());
+	CStorage::SaveSettings(settings, carousel.GetZoomStop(), carousel.GetSelectedIndex());
 }
 
 void SaveNow(CCarousel &carousel, const CSettings &settings, const CMasterKey &masterKey)
@@ -94,8 +94,10 @@ EStorageLoadResult LoadAccountsNow(CCarousel &carousel, const CSettings &setting
 EStorageLoadResult LoadSettingsNow(CCarousel &carousel, CSettings &settings)
 {
 	std::int32_t zoomStop = 0;
-	const EStorageLoadResult result = CStorage::LoadSettings(settings, zoomStop);
+	std::int32_t selectedBanner = 0;
+	const EStorageLoadResult result = CStorage::LoadSettings(settings, zoomStop, selectedBanner);
 	carousel.ApplyZoomStop(zoomStop);
+	carousel.ApplySelectedIndex(selectedBanner);
 	return result;
 }
 
@@ -336,7 +338,8 @@ int main(int argc, char *argv[])
 	// 1042x675 literal.
 	CSettings bootSettings;
 	std::int32_t bootZoomStopUnused = 0;
-	CStorage::LoadSettings(bootSettings, bootZoomStopUnused);
+	std::int32_t bootSelectedBannerUnused = 0;
+	CStorage::LoadSettings(bootSettings, bootZoomStopUnused, bootSelectedBannerUnused);
 
 	CWindow window;
 	if (!window.Create(L"Rift", bootSettings.m_nWindowWidth, bootSettings.m_nWindowHeight)) {
