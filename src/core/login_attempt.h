@@ -116,14 +116,13 @@ class CLoginAttempt {
 	// the worker actually finishes - IsActive keeps reporting true in the meantime, since the
 	// worker hasn't stopped yet even though it's been asked to.
 	//
-	// Also shortens Update()'s watchdog to a short grace period: a healthy worker acknowledges
-	// this within a poll interval, so one that doesn't is wedged somewhere it can't be
-	// interrupted from - and the user has already said they're done waiting on it. See
-	// AbandonWorker.
+	// Also starts Update()'s grace-period deadline: a healthy worker acknowledges this within a
+	// poll interval, so one that doesn't is wedged somewhere it can't be interrupted from - and
+	// the user has already said they're done waiting on it. See AbandonWorker.
 	void Cancel();
 
 	// True from Start() until Update() disposes of the worker - by joining a finished one, or by
-	// abandoning one that blew its watchdog (see AbandonWorker). NOT the same as "still doing
+	// abandoning one that blew its cancel grace period (see AbandonWorker). NOT the same as "still doing
 	// real work" the instant Cancel() is called, since the worker only notices that
 	// asynchronously. A caller driving the Login/Cancel control (see account_modal.cpp) should
 	// gate starting a new attempt on this being false, rather than calling Start() again
@@ -147,35 +146,27 @@ class CLoginAttempt {
 	static bool IsTerminalStage(ELoginStage stage);
 
 	// Call once per frame regardless of whether anything is currently showing this attempt's
-	// progress - it is what both retires a finished worker and enforces the watchdog, so an
-	// attempt whose progress nothing happens to be drawing still can't get stuck active forever.
+	// progress - it retires a finished worker and, once Cancel() has been called, abandons one
+	// that doesn't acknowledge it within its grace period (see AbandonWorker). No time-based
+	// abort otherwise - an attempt that hasn't been cancelled stays active however long it takes.
 	// Joins only a worker that has already signalled it finished, so the join is always
-	// effectively instantaneous; a worker past its deadline is abandoned rather than waited on
-	// (see AbandonWorker). Never blocks the caller waiting for the worker to do its work.
-	//
-	// The one stage the watchdog deliberately doesn't measure is LOGIN_STAGE_WAITING_FOR_PROCESS:
-	// its wait for the Riot Client's window is unbounded on purpose (see the .cpp), so an attempt
-	// sitting there can stay active indefinitely - Cancel() is what ends it, and the UI keeps a
-	// Cancel control live for exactly as long (see account_modal.cpp). Every stage after it is
-	// bounded and still watchdogged, and a cancel requested in that stage runs the clock down
-	// normally, so a wedged worker is still disposed of rather than waited on forever.
+	// effectively instantaneous. Never blocks the caller waiting for the worker to do its work.
 	void Update();
 
   private:
-	// Gives up on a worker that has blown m_watchdogDeadline: it's blocked inside a call with no
-	// cancellation point and no timeout of its own, so no amount of further waiting brings it
-	// back. Not to be confused with the deliberately unbounded wait for the client's window,
-	// which Update() holds this off for entirely - that one is waiting on purpose, and is
-	// interruptible. Detaches the OS thread, hands it sole ownership of the state block it's still writing
-	// into, and swaps in a fresh block already carrying the terminal result - so GetStage() reads
-	// terminal immediately, IsActive() goes false, and the very next Start() is free to run.
+	// Gives up on a worker that was cancelled but didn't acknowledge it within the grace period
+	// (see Cancel) - blocked inside a call with no cancellation point of its own, so no amount of
+	// further waiting brings it back. Detaches the OS thread, hands it sole ownership of the
+	// state block it's still writing into, and swaps in a fresh block already carrying the
+	// terminal result - so GetStage() reads terminal immediately, IsActive() goes false, and the
+	// very next Start() is free to run.
 	void AbandonWorker();
 
 	std::shared_ptr<SLoginAttemptState> m_pState;
 	std::thread m_worker;
 	bool m_bActive = false; // a worker thread exists and hasn't been joined/abandoned yet
 
-	// When the current attempt stops being given the benefit of the doubt - see AbandonWorker
-	// and Update(). Only meaningful while m_bActive.
-	std::chrono::steady_clock::time_point m_watchdogDeadline{};
+	// Set by Cancel() - see AbandonWorker. Only meaningful once a cancel has actually been
+	// requested; otherwise never checked.
+	std::chrono::steady_clock::time_point m_cancelDeadline{};
 };

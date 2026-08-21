@@ -778,12 +778,17 @@ bool CAccountModal::OnPointerUp(float x, float y)
 
 	const Layout layout = ComputeLayout();
 
-	if (RectContainsPoint(CloseBadgeRect(layout.Left), x, y)) {
+	// A login in flight can't be dismissed by clicking away - Cancel (below, in the
+	// LOGIN_PROGRESS branch) is the only way out, so a stray click can't abandon it
+	// without the worker ever finding out.
+	const bool bLoggingIn = m_mode == EAccountModalMode::ACCOUNT_MODAL_MODE_LOGIN_PROGRESS;
+
+	if (!bLoggingIn && RectContainsPoint(CloseBadgeRect(layout.Left), x, y)) {
 		Close();
 		return true;
 	}
 
-	if (!RectContainsPoint(layout.Panel, x, y)) {
+	if (!bLoggingIn && !RectContainsPoint(layout.Panel, x, y)) {
 		Close();
 		return true;
 	}
@@ -964,7 +969,10 @@ ECursorKind CAccountModal::GetDesiredCursor() const
 
 	const Layout layout = ComputeLayout();
 
-	if (RectContainsPoint(CloseBadgeRect(layout.Left), m_flMouseX, m_flMouseY)) {
+	// Matches OnPointerUp: the close badge doesn't actually close anything while a login is
+	// in flight, so it shouldn't look clickable either.
+	if (m_mode != EAccountModalMode::ACCOUNT_MODAL_MODE_LOGIN_PROGRESS &&
+		RectContainsPoint(CloseBadgeRect(layout.Left), m_flMouseX, m_flMouseY)) {
 		return ECursorKind::CURSOR_HAND;
 	}
 

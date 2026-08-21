@@ -99,7 +99,8 @@ class CAccountModal : public CWidget {
 	void Update(float deltaSeconds) override;
 	void Draw(CDrawList &drawList) override;
 
-	// Handles a click if the modal is blocking: backdrop/close-badge closes it, a row
+	// Handles a click if the modal is blocking: backdrop/close-badge closes it (except
+	// during LOGIN_PROGRESS - Cancel is the only way out of an in-flight login), a row
 	// selects it, Login starts a background attempt and switches to LOGIN_PROGRESS, the
 	// header's + button starts adding a row, a row's pencil/x buttons start editing/
 	// delete it, and (in EDIT_ACCOUNT) Save/Cancel/Delete mutate m_carousel directly.

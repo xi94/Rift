@@ -22,13 +22,12 @@ namespace {
 // front of them. Everything past this point is a step that either lands quickly or is genuinely
 // broken, so those keep their timeouts; this one is bounded by the user's own Cancel instead,
 // which is live for the whole wait (the modal's Login button reads "Cancel" while an attempt is
-// in flight - see ui/account_modal.cpp) and interrupts it within a poll interval. Note
-// CLoginAttempt::Update's watchdog deliberately doesn't measure this stage either - see there.
+// in flight - see ui/account_modal.cpp) and interrupts it within a poll interval.
 constexpr std::uint32_t kFormTimeoutMs = 10000;
 constexpr std::uint32_t kResultTimeoutMs = 6000;
 
 // What BringToForeground/SetKeyboardFocus get - named rather than repeated inline at their call
-// sites below, since kWorstCaseAttemptMs has to add them up.
+// sites below.
 constexpr std::uint32_t kForegroundTimeoutMs = 5000;
 constexpr std::uint32_t kFocusTimeoutMs = 5000;
 
@@ -57,16 +56,6 @@ constexpr const char *kLaunchFailedMessage = "Couldn't launch the Riot Client.";
 constexpr const char *kWindowTimeoutMessage = "The Riot Client didn't respond in time.";
 constexpr const char *kFormTimeoutMessage = "Couldn't find the Riot Client's login form.";
 constexpr const char *kUnresponsiveClientMessage = "The Riot Client stopped responding - try again.";
-
-// The watchdog CLoginAttempt::Update measures a whole attempt against. Deliberately loose - every
-// step it covers already has its own timeout, so blowing this means the worker is blocked
-// somewhere that has none, and a false positive would abandon a login that was actually working.
-// Summed from the individual budgets (the doubled group is the one retry-without-relaunch path)
-// so tuning any of them can't silently make this too tight. The unbounded wait for the client's
-// window contributes nothing to this sum on purpose - it isn't measured at all (see Update).
-constexpr std::uint32_t kWorstCaseAttemptMs =
-	(kForegroundTimeoutMs + kFocusTimeoutMs + kFormTimeoutMs + kResultTimeoutMs) * 2 + kPlayButtonTimeoutMs;
-constexpr auto kWatchdogTimeout = std::chrono::milliseconds(kWorstCaseAttemptMs * 2);
 
 // How long a cancelled-but-unacknowledged worker gets before it's abandoned - see Cancel(). A
 // healthy one notices within a 100ms poll interval.
@@ -358,7 +347,6 @@ void CLoginAttempt::Start(CStringView username, CStringView password, CStringVie
 	pState->Stage.store(ELoginStage::LOGIN_STAGE_WAITING_FOR_PROCESS, std::memory_order_relaxed);
 
 	m_pState = pState;
-	m_watchdogDeadline = std::chrono::steady_clock::now() + kWatchdogTimeout;
 	m_worker = std::thread(WorkerMain, std::move(pState));
 	m_bActive = true;
 }
@@ -372,11 +360,7 @@ void CLoginAttempt::Cancel()
 
 	// A worker that can still check the flag acts on it within a poll interval; one that can't is
 	// wedged in a call nothing can interrupt, and the user has already said they're done waiting.
-	// Never extends an earlier deadline, only brings it in.
-	const auto cancelDeadline = std::chrono::steady_clock::now() + kCancelGracePeriod;
-	if (cancelDeadline < m_watchdogDeadline) {
-		m_watchdogDeadline = cancelDeadline;
-	}
+	m_cancelDeadline = std::chrono::steady_clock::now() + kCancelGracePeriod;
 }
 
 ELoginStage CLoginAttempt::GetStage() const
@@ -439,22 +423,10 @@ void CLoginAttempt::Update()
 		return;
 	}
 
-	// The wait for the client's window has no timeout of its own (see kWaitForeverMs's use in
-	// RunLoginAttempt), so the watchdog can't meaningfully measure that stage: a client that's
-	// merely slow to start would otherwise be abandoned as "unresponsive" at exactly the moment
-	// the user was told to keep waiting. Hold the deadline off for as long as the worker is
-	// still in it; every stage after it is bounded and stays measured as before. A requested
-	// cancel is the one thing that still runs the clock down here - Cancel()'s own grace period
-	// is what disposes of a worker too wedged to acknowledge it, and that has to keep working in
-	// this stage too, since it's now the only bound on it at all.
-	const bool bWaitingForClient = GetStage() == ELoginStage::LOGIN_STAGE_WAITING_FOR_PROCESS &&
-								   m_pState != nullptr && !m_pState->bCancelRequested.load(std::memory_order_relaxed);
-	if (bWaitingForClient) {
-		m_watchdogDeadline = std::chrono::steady_clock::now() + kWatchdogTimeout;
-		return;
-	}
-
-	if (std::chrono::steady_clock::now() >= m_watchdogDeadline) {
+	// Only abandoned after a requested cancel goes unacknowledged past its grace period - never
+	// purely for running long. See Cancel()/AbandonWorker.
+	if (m_pState != nullptr && m_pState->bCancelRequested.load(std::memory_order_relaxed) &&
+		std::chrono::steady_clock::now() >= m_cancelDeadline) {
 		AbandonWorker();
 	}
 }
