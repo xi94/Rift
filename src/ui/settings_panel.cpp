@@ -652,19 +652,8 @@ void DrawResetButton(CDrawList &drawList, const CTexture *pIcon, Rect rect, floa
 }
 
 // A knob's own outline, so it stays a distinct object rather than dissolving into whatever
-// it's sitting on - a white knob on a pale accent, or a dark one on a deep accent, both
-// read as a smudge without it. Deliberately not the full opposite of the knob: that's a
-// hard black or white hairline that draws more attention than the control itself. Lerping
-// most of the way there lands on a mid tone that separates cleanly at a glance and stays
-// quiet, and it derives from the knob rather than being a fixed grey so it inverts along
-// with everything else when the accent goes bright.
+// it's sitting on - see ColorOutlineOn in core/types.h for the color itself.
 constexpr float kKnobRingThickness = 1.5f;
-
-Color KnobRingColor(Color knob)
-{
-	constexpr float kRingStrength = 0.6f;
-	return ColorLerp(knob, ColorForegroundOn(knob), kRingStrength);
-}
 
 // A pill track + sliding dot, onAmount already eased 0..1 by the caller (see
 // CSettingsPanel::Update) so the switch always animates rather than snapping.
@@ -682,7 +671,7 @@ void DrawToggle(CDrawList &drawList, Rect rect, float onAmount, Color accent, st
 	// Ring outside, fill inset within it: the knob keeps exactly the footprint it had, so
 	// adding the outline changes nothing about the switch's proportions.
 	drawList.AddRectRoundedFilled(dotX, rect.Y + 3.0f, dotSize, dotSize, CDrawList::UniformRadii(dotSize * 0.5f),
-								  ColorFadeAlpha(KnobRingColor(knob), alpha));
+								  ColorFadeAlpha(ColorOutlineOn(knob), alpha));
 	const float dotInner = dotSize - kKnobRingThickness * 2.0f;
 	drawList.AddRectRoundedFilled(dotX + kKnobRingThickness, rect.Y + 3.0f + kKnobRingThickness, dotInner, dotInner,
 								  CDrawList::UniformRadii(dotInner * 0.5f), ColorFadeAlpha(knob, alpha));
@@ -725,11 +714,11 @@ void DrawSlider(CDrawList &drawList, const CFont &font, Rect track, float t, CSt
 	const float thumbCx = track.X + fillW;
 	const float thumbCy = track.Y + track.H * 0.5f;
 	// Against the accent, since the thumb rides the end of the filled part of the track.
-	// Ringed like the toggle's knob, and for the same reason - see KnobRingColor.
+	// Ringed like the toggle's knob, and for the same reason - see ColorOutlineOn.
 	const Color thumb = ColorForegroundOn(accent);
 	drawList.AddRectRoundedFilled(thumbCx - kSliderThumbRadius, thumbCy - kSliderThumbRadius, kSliderThumbRadius * 2.0f,
 								  kSliderThumbRadius * 2.0f, CDrawList::UniformRadii(kSliderThumbRadius),
-								  ColorFadeAlpha(KnobRingColor(thumb), alpha));
+								  ColorFadeAlpha(ColorOutlineOn(thumb), alpha));
 	const float thumbInner = kSliderThumbRadius - kKnobRingThickness;
 	drawList.AddRectRoundedFilled(thumbCx - thumbInner, thumbCy - thumbInner, thumbInner * 2.0f, thumbInner * 2.0f,
 								  CDrawList::UniformRadii(thumbInner), ColorFadeAlpha(thumb, alpha));
@@ -1544,6 +1533,15 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 			CornerRoundnessToT(m_flCornerRoundnessDisplay),
 			CStringView{roundnessBuffer, roundnessWritten > 0 ? static_cast<std::uint64_t>(roundnessWritten) : 0},
 			m_settings.m_clrAccent, alpha);
+	}
+
+	if (RowInView(rows.ExcludeFromCapture, layout.ScrollRegion)) {
+		DrawRowLabel(drawList, m_fonts, rows.ExcludeFromCapture, "Hide From Screen Capture",
+					 "Excludes the account list from screenshots and screen sharing.",
+					 LabelRightEdge(ToggleRect(rows.ExcludeFromCapture, m_fonts), rows.ExcludeFromCapture, m_fonts),
+					 alpha);
+		DrawToggle(drawList, ToggleRect(rows.ExcludeFromCapture, m_fonts), m_flExcludeFromCaptureToggleAmount,
+				   m_settings.m_clrAccent, alpha);
 	}
 
 	if (RowInView(rows.CloseToTray, layout.ScrollRegion)) {

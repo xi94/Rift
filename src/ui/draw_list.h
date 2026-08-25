@@ -226,6 +226,14 @@ class CDrawList {
 
 	void AddRectRoundedFilled(float x, float y, float w, float h, CornerRadii radii, Color color);
 
+	// Fill plus a border, in one call. A border isn't a stroke primitive here (see
+	// AddRectRoundedFilled's own note): it's an outer rounded rect in the border color with
+	// the fill drawn inset on top, which is what every bordered shape in this project
+	// already does by hand. Shared because every accent-colored control needs the same
+	// treatment - see ColorOutlineOn in core/types.h for where the border color comes from.
+	void AddRectRoundedBordered(float x, float y, float w, float h, CornerRadii radii, Color fill, Color border,
+								float thickness);
+
 	// The account modal's login/progress ring - a single quad (big enough to hold the ring
 	// plus its outer glow margin) submitted through ps_circular_progress, which computes
 	// the track, the animated comet-tail sweep (or a full solid ring when sweepAngleDeg

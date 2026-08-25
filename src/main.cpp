@@ -623,6 +623,7 @@ int main(int argc, char *argv[])
 
 		window.SetCloseToTray(settings.m_bCloseToTray && tray.IsIconVisible());
 		tray.SetAccentColor(settings.m_clrAccent);
+		pCarousel->SetAccentColor(settings.m_clrAccent);
 
 		const ETrayEventType trayEvent = tray.TakeEvent();
 		if (trayEvent == ETrayEventType::TRAY_EVENT_EXIT_REQUESTED) {

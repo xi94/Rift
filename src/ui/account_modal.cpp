@@ -1592,8 +1592,12 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 		if (hoverSave) {
 			CHoverable::DrawLift(drawList, save, 8.0f, m_settings.m_clrAccent, alpha);
 		}
-		drawList.AddRectRoundedFilled(save.X, save.Y, save.W, save.H, CDrawList::UniformRadii(8.0f),
-									  ColorFadeAlpha(saveColor, alpha));
+		// Outlined, like every accent-filled control - see ColorOutlineOn. Near the
+		// light/dark crossover either text color is defensible, and the outline is what keeps
+		// the button's own shape distinct from the panel behind it either way.
+		drawList.AddRectRoundedBordered(save.X, save.Y, save.W, save.H, CDrawList::UniformRadii(8.0f),
+										ColorFadeAlpha(saveColor, alpha),
+										ColorFadeAlpha(ColorOutlineOn(saveColor), alpha), 1.0f);
 		DrawCenteredText(drawList, body, save.X, save.Y, save.W, save.H, StringViewFromCString("Save"),
 						 ColorFadeAlpha(saveEnabled ? ColorForegroundOn(saveColor) : kColorTextDim, alpha));
 
@@ -1656,8 +1660,9 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 		if (hoverLogin) {
 			CHoverable::DrawLift(drawList, loginButton, 8.0f, m_settings.m_clrAccent, alpha);
 		}
-		drawList.AddRectRoundedFilled(loginButton.X, loginButton.Y, loginButton.W, loginButton.H,
-									  CDrawList::UniformRadii(8.0f), ColorFadeAlpha(buttonColor, alpha));
+		drawList.AddRectRoundedBordered(loginButton.X, loginButton.Y, loginButton.W, loginButton.H,
+										CDrawList::UniformRadii(8.0f), ColorFadeAlpha(buttonColor, alpha),
+										ColorFadeAlpha(ColorOutlineOn(buttonColor), alpha), 1.0f);
 		DrawCenteredText(drawList, body, loginButton.X, loginButton.Y, loginButton.W, loginButton.H,
 						 StringViewFromCString("Login"),
 						 ColorFadeAlpha(loginEnabled ? ColorForegroundOn(buttonColor) : kColorTextDim, alpha));

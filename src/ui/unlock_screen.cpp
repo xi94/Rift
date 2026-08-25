@@ -401,7 +401,8 @@ void CUnlockScreen::Draw(CDrawList &drawList)
 					 RectContainsPoint(reveal, m_flMouseX, m_flMouseY) ? kColorTextBright : kColorTextDim);
 
 		const Rect button = ButtonRect(card);
-		drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
+		drawList.AddRectRoundedBordered(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent,
+										ColorOutlineOn(accent), 1.0f);
 		DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H, StringViewFromCString("Unlock"),
 						 ColorForegroundOn(accent));
 
@@ -439,7 +440,8 @@ void CUnlockScreen::Draw(CDrawList &drawList)
 				 RectContainsPoint(confirmReveal, m_flMouseX, m_flMouseY) ? kColorTextBright : kColorTextDim);
 
 	const Rect button = SetupButtonRect(card);
-	drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
+	drawList.AddRectRoundedBordered(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent,
+									ColorOutlineOn(accent), 1.0f);
 	DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H, StringViewFromCString("Create Password"),
 					 ColorForegroundOn(accent));
 

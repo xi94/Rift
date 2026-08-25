@@ -71,9 +71,12 @@ constexpr Color kModeSwitcherBg{26, 26, 30, 255};
 constexpr Color kModeSwitcherBorder{58, 58, 64, 255};
 // The active row's fill is a plain neutral grey plus a thin accent-colored bar on its
 // left edge, not a solid accent-tinted block - "indicator, not a wash of color."
+// The active row's base fill, before the accent is mixed into it (see DrawModeSwitcher) -
+// enough accent to read as selected, not so much that a bright accent turns the flyout into
+// the loudest thing on screen.
 constexpr Color kModeSwitcherActiveRowFill{52, 52, 58, 255};
+constexpr float kModeSwitcherActiveRowAccentMix = 0.35f;
 constexpr Color kModeSwitcherText{190, 190, 196, 255};
-constexpr Color kModeSwitcherTextActive{240, 240, 244, 255};
 constexpr float kModeSwitcherRowIconSize = 24.0f;
 constexpr float kModeSwitcherRowIconGap = 10.0f;
 
@@ -86,7 +89,6 @@ constexpr float kModeSwitcherTrackWidth = 4.0f;
 constexpr float kModeSwitcherIndicatorHeight = 18.0f;
 constexpr float kModeSwitcherIndicatorPaddingX = 7.0f;
 constexpr Color kModeSwitcherTrackBg{58, 58, 64, 255};
-constexpr Color kModeSwitcherIndicatorFill{150, 130, 215, 255};
 
 // Carousel (stop 0) -> Grid (stops 1-3: base, grown, max) -> List (stops 4-6: base,
 // grown, max) - see CCarousel::m_nZoomStop's own comment.
@@ -1207,10 +1209,16 @@ void CCarousel::DrawModeSwitcher(CDrawList &drawList) const
 		// row's 3px accent bar either way.
 		const float contentX = row.X + 12.0f;
 		if (active) {
-			drawList.AddRectRoundedFilled(row.X, row.Y, row.W, row.H, CDrawList::UniformRadii(6.0f),
-										  ColorFadeAlpha(kModeSwitcherActiveRowFill, alpha));
+			// Tinted with the accent and outlined, like every other selected/accent surface
+			// in the app - this row used to be a flat grey with a hardcoded purple bar, which
+			// stayed purple no matter what accent the user picked.
+			const Color activeFill =
+				ColorLerp(kModeSwitcherActiveRowFill, m_clrAccent, kModeSwitcherActiveRowAccentMix);
+			drawList.AddRectRoundedBordered(row.X, row.Y, row.W, row.H, CDrawList::UniformRadii(6.0f),
+											ColorFadeAlpha(activeFill, alpha),
+											ColorFadeAlpha(ColorOutlineOn(activeFill), alpha), 1.0f);
 			drawList.AddRectRoundedFilled(row.X + 2.0f, row.Y + 3.0f, 3.0f, row.H - 6.0f, CDrawList::UniformRadii(1.5f),
-										  ColorFadeAlpha(kModeSwitcherIndicatorFill, alpha));
+										  ColorFadeAlpha(m_clrAccent, alpha));
 		}
 		const Rect iconBox{
 			contentX,
@@ -1218,11 +1226,16 @@ void CCarousel::DrawModeSwitcher(CDrawList &drawList) const
 			kModeSwitcherRowIconSize,
 			kModeSwitcherRowIconSize,
 		};
-		DrawModeGlyph(drawList, m_assets, mode, iconBox,
-					  ColorFadeAlpha(active ? kModeSwitcherTextActive : kModeSwitcherText, alpha));
+		// The active row's own content contrasts against the fill it sits on rather than
+		// assuming white, since that fill now carries the user's accent.
+		const Color rowContent =
+			active
+				? ColorForegroundOn(ColorLerp(kModeSwitcherActiveRowFill, m_clrAccent, kModeSwitcherActiveRowAccentMix))
+				: kModeSwitcherText;
+		DrawModeGlyph(drawList, m_assets, mode, iconBox, ColorFadeAlpha(rowContent, alpha));
 		DrawText(drawList, body, contentX + kModeSwitcherRowIconSize + kModeSwitcherRowIconGap,
 				 row.Y + row.H * 0.5f + (body.GetAscent() + body.GetDescent()) * 0.5f, ViewModeName(mode),
-				 ColorFadeAlpha(active ? kModeSwitcherTextActive : kModeSwitcherText, alpha));
+				 ColorFadeAlpha(rowContent, alpha));
 	}
 
 	// The percentage slider: a thin track, bottom = 0% (Carousel) to top = 100% (List at
@@ -1255,17 +1268,17 @@ void CCarousel::DrawModeSwitcher(CDrawList &drawList) const
 		indicatorW,
 		kModeSwitcherIndicatorHeight,
 	};
-	// A thin dark border ring plus the fill, so the pill reads as a real control sitting on
-	// the track rather than a flat patch of color.
-	drawList.AddRectRoundedFilled(indicator.X - 1.0f, indicator.Y - 1.0f, indicator.W + 2.0f, indicator.H + 2.0f,
-								  CDrawList::UniformRadii(indicator.H * 0.5f + 1.0f),
-								  ColorFadeAlpha(Color{16, 14, 22, 255}, alpha));
-	drawList.AddRectRoundedFilled(indicator.X, indicator.Y, indicator.W, indicator.H,
-								  CDrawList::UniformRadii(indicator.H * 0.5f),
-								  ColorFadeAlpha(kModeSwitcherIndicatorFill, alpha));
+	// A border ring plus the fill, so the pill reads as a real control sitting on the track
+	// rather than a flat patch of color. Both the fill and its ring follow the accent now;
+	// the readout inside contrasts against that fill instead of being a hardcoded near-black
+	// that only happened to work against the old fixed purple.
+	drawList.AddRectRoundedBordered(indicator.X - 1.0f, indicator.Y - 1.0f, indicator.W + 2.0f, indicator.H + 2.0f,
+									CDrawList::UniformRadii(indicator.H * 0.5f + 1.0f),
+									ColorFadeAlpha(m_clrAccent, alpha),
+									ColorFadeAlpha(ColorOutlineOn(m_clrAccent), alpha), 1.0f);
 	DrawText(drawList, secondary, indicator.X + kModeSwitcherIndicatorPaddingX,
 			 indicator.Y + indicator.H * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f - 1.0f,
-			 percentText, ColorFadeAlpha(Color{20, 18, 26, 255}, alpha));
+			 percentText, ColorFadeAlpha(ColorForegroundOn(m_clrAccent), alpha));
 }
 
 void CCarousel::Draw(CDrawList &drawList)

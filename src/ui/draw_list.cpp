@@ -254,6 +254,22 @@ void CDrawList::AddRectFilled(float x, float y, float w, float h, Color color)
 	EmitQuadIndices(base);
 }
 
+void CDrawList::AddRectRoundedBordered(float x, float y, float w, float h, CornerRadii radii, Color fill, Color border,
+									   float thickness)
+{
+	AddRectRoundedFilled(x, y, w, h, radii, border);
+
+	// The inner radii shrink with the inset so the border keeps a constant thickness around
+	// the curve instead of bunching up at the corners.
+	const CornerRadii innerRadii{
+		std::max(0.0f, radii.TopLeft - thickness),
+		std::max(0.0f, radii.TopRight - thickness),
+		std::max(0.0f, radii.BottomRight - thickness),
+		std::max(0.0f, radii.BottomLeft - thickness),
+	};
+	AddRectRoundedFilled(x + thickness, y + thickness, w - thickness * 2.0f, h - thickness * 2.0f, innerRadii, fill);
+}
+
 void CDrawList::AddRectOutline(float x, float y, float w, float h, float thickness, Color color)
 {
 	AddRectFilled(x, y, w, thickness, color);												 // top

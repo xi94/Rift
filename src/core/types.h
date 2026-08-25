@@ -66,6 +66,15 @@ inline Color ColorLighten(Color color, std::uint8_t amount)
 	return Color{Clamp255(color.R + amount), Clamp255(color.G + amount), Clamp255(color.B + amount), color.A};
 }
 
+inline Color ColorLerp(Color a, Color b, float t)
+{
+	auto Lerp8 = [](std::uint8_t from, std::uint8_t to, float t) {
+		return static_cast<std::uint8_t>(static_cast<float>(from) +
+										 (static_cast<float>(to) - static_cast<float>(from)) * t);
+	};
+	return Color{Lerp8(a.R, b.R, t), Lerp8(a.G, b.G, t), Lerp8(a.B, b.B, t), 255};
+}
+
 // Relative luminance, 0 (black) to 1 (white), weighted the way the eye actually responds -
 // green carries most of the perceived brightness and blue almost none, which is why a
 // saturated yellow reads as far lighter than a saturated blue of the same "value".
@@ -89,24 +98,33 @@ inline float ColorRelativeLuminance(Color color)
 // white, because the accent color is the user's to choose - and white text on a bright
 // yellow or cyan accent is unreadable.
 //
-// The 0.179 crossover is where WCAG's own contrast ratio against black overtakes the one
-// against white, so this picks whichever genuinely contrasts more rather than guessing at a
-// midpoint. Neither result is pure black or white: both would be harsher against a
-// saturated color than the app's own text tones.
+// The crossover is calibrated against this app's own default accent rather than taken from
+// WCAG's black/white boundary (~0.179). That default sits at ~0.181 luminance - a hair the
+// wrong side of it - so the strict rule flipped the shipped look to black text on a purple
+// that white reads perfectly well on. 0.22 keeps the default (and everything up to about
+// its brightness) on white, and still catches the colors that genuinely need black: any
+// yellow, cyan, or mid-to-light green lands far above it, since green alone carries most of
+// the perceived brightness.
+//
+// The margin around the crossover is also why every accent-filled control in this app is
+// outlined (see ColorOutlineOn): near the boundary either foreground is defensible, and an
+// outline is what keeps the shape legible regardless of which way this call goes.
 inline Color ColorForegroundOn(Color background)
 {
 	constexpr Color kOnLight{18, 18, 20, 255};
 	constexpr Color kOnDark{245, 245, 248, 255};
-	return ColorRelativeLuminance(background) > 0.179f ? kOnLight : kOnDark;
+	return ColorRelativeLuminance(background) > 0.22f ? kOnLight : kOnDark;
 }
 
-inline Color ColorLerp(Color a, Color b, float t)
+// The outline for a shape filled with `fill`: its own contrasting foreground, pulled most
+// of the way back toward the fill. The full opposite is a hard black or white hairline that
+// draws more attention than the control it's defining; this lands on a mid tone that still
+// separates the shape cleanly from whatever is behind it. Derived from the fill rather than
+// being a fixed grey, so it inverts along with everything else when the accent goes bright.
+inline Color ColorOutlineOn(Color fill)
 {
-	auto Lerp8 = [](std::uint8_t from, std::uint8_t to, float t) {
-		return static_cast<std::uint8_t>(static_cast<float>(from) +
-										 (static_cast<float>(to) - static_cast<float>(from)) * t);
-	};
-	return Color{Lerp8(a.R, b.R, t), Lerp8(a.G, b.G, t), Lerp8(a.B, b.B, t), 255};
+	constexpr float kStrength = 0.6f;
+	return ColorLerp(fill, ColorForegroundOn(fill), kStrength);
 }
 
 // Per-corner rounding radii for a rounded rectangle - zero on any corner squares it off.

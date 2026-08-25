@@ -473,7 +473,8 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 						StringViewFromCString(m_updater.GetErrorMessage()), kColorError, kMaxMessageLines);
 
 		const Rect button = PrimaryButtonRect(card);
-		drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
+		drawList.AddRectRoundedBordered(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent,
+										ColorOutlineOn(accent), 1.0f);
 		DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H, StringViewFromCString("Try Again"),
 						 ColorForegroundOn(accent));
 	} else if (stage == EUpdateStage::UPDATE_STAGE_AVAILABLE) {
@@ -508,7 +509,8 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 						   m_flMouseX, m_flMouseY);
 
 		const Rect button = PrimaryButtonRect(card);
-		drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
+		drawList.AddRectRoundedBordered(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent,
+										ColorOutlineOn(accent), 1.0f);
 		DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H,
 						 StringViewFromCString("Download & Install"), ColorForegroundOn(accent));
 	} else if (stage == EUpdateStage::UPDATE_STAGE_MANUAL_UPGRADE_REQUIRED) {
@@ -572,7 +574,8 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 		}
 
 		const Rect button = PrimaryButtonRect(card);
-		drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
+		drawList.AddRectRoundedBordered(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent,
+										ColorOutlineOn(accent), 1.0f);
 		DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H, StringViewFromCString("Try Again"),
 						 ColorForegroundOn(accent));
 	}

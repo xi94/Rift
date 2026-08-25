@@ -87,6 +87,16 @@ class CCarousel : public CWidget {
 	// per-banner texture the caller hands in through AddBanner or a hand-drawn glyph.
 	CCarousel(CFontManager &fonts, CAssetManager &assets);
 
+	// The user's accent color, pushed in once per frame by the coordinating owner rather
+	// than taken as a CSettings& - this widget is constructed before main() has a settings
+	// object to hand it, and the same per-frame push already serves CTray (see main.cpp).
+	// Drives the view-mode switcher's active row and its zoom readout; the per-game accents
+	// on the cards themselves are the banners' own and stay untouched.
+	void SetAccentColor(Color accent)
+	{
+		m_clrAccent = accent;
+	}
+
 	// Appends a new banner (game). textureAspect is derived from pTexture's real
 	// dimensions here, once, so cover-fit cropping never needs to re-query the renderer
 	// later.
@@ -272,6 +282,7 @@ class CCarousel : public CWidget {
 				  float mouseY) const;
 	void DrawModeSwitcher(CDrawList &drawList) const;
 
+	Color m_clrAccent{108, 90, 220, 255}; // see SetAccentColor; matches CSettings' own default
 	CFontManager &m_fonts;
 	CAssetManager &m_assets;
 
