@@ -89,8 +89,7 @@ HBITMAP DecodePngToPremultipliedDib(const std::uint8_t *pBytes, std::uint64_t le
 	int width = 0;
 	int height = 0;
 	int channels = 0;
-	unsigned char *pPixels =
-		stbi_load_from_memory(pBytes, static_cast<int>(length), &width, &height, &channels, 4);
+	unsigned char *pPixels = stbi_load_from_memory(pBytes, static_cast<int>(length), &width, &height, &channels, 4);
 	if (pPixels == nullptr || width <= 0 || height <= 0) {
 		return nullptr;
 	}
@@ -324,9 +323,9 @@ void CTray::ShowContextMenu()
 			if (accountIndex >= m_model.AccountCount) {
 				break;
 			}
-			wchar_t username[96];
-			ToWide(m_model.Accounts[accountIndex].Username, username, 96);
-			append(gameMenu, MF_STRING, kMenuIdQuickLoginBase + accountIndex, username, nullptr, false, false, false,
+			wchar_t label[96];
+			ToWide(m_model.Accounts[accountIndex].Label, label, 96);
+			append(gameMenu, MF_STRING, kMenuIdQuickLoginBase + accountIndex, label, nullptr, false, false, false,
 				   false);
 		}
 		if (game.AccountCount == 0) {
@@ -357,9 +356,31 @@ void CTray::ShowContextMenu()
 	menuInfo.hbrBack = m_hBackBrush;
 	SetMenuInfo(menu, &menuInfo);
 
+	// Which way the menu unfolds from the cursor. A tray icon is by definition next to the
+	// taskbar, so the plain default (down and to the right) grows the menu straight into it
+	// and the last item - Exit - ends up underneath it. Picking the direction from which
+	// half of the work area the cursor is in handles a taskbar on any edge: bottom-right
+	// tray opens up-and-left, a top taskbar opens down, and so on.
+	UINT alignFlags = TPM_LEFTALIGN | TPM_TOPALIGN;
+	MONITORINFO monitorInfo{};
+	monitorInfo.cbSize = sizeof(monitorInfo);
+	if (GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &monitorInfo)) {
+		const LONG centerX = (monitorInfo.rcWork.left + monitorInfo.rcWork.right) / 2;
+		const LONG centerY = (monitorInfo.rcWork.top + monitorInfo.rcWork.bottom) / 2;
+		alignFlags = (cursor.x >= centerX ? TPM_RIGHTALIGN : TPM_LEFTALIGN) |
+					 (cursor.y >= centerY ? TPM_BOTTOMALIGN : TPM_TOPALIGN);
+	}
+
 	// Required so the menu dismisses correctly when the user clicks away from it.
 	SetForegroundWindow(m_hWnd);
-	TrackPopupMenu(menu, TPM_RIGHTBUTTON, cursor.x, cursor.y, 0, m_hWnd, nullptr);
+	// TPM_WORKAREA is the actual guarantee: it clamps the menu to the monitor's work area
+	// (which excludes the taskbar) rather than to the full screen, so even a menu too tall
+	// to fit is kept off it instead of running underneath. It's only honored by
+	// TrackPopupMenuEx, and only when a TPMPARAMS is supplied - an empty rcExclude means
+	// "nothing to avoid beyond that", which is all this needs.
+	TPMPARAMS popupParams{};
+	popupParams.cbSize = sizeof(popupParams);
+	TrackPopupMenuEx(menu, alignFlags | TPM_RIGHTBUTTON | TPM_WORKAREA, cursor.x, cursor.y, m_hWnd, &popupParams);
 	PostMessageW(m_hWnd, WM_NULL, 0, 0);
 
 	DestroyMenu(menu);
@@ -418,8 +439,7 @@ LRESULT CTray::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 				m_pendingEvent = ETrayEventType::TRAY_EVENT_SHOW_WINDOW;
 			} else if (commandId == kMenuIdExit) {
 				m_pendingEvent = ETrayEventType::TRAY_EVENT_EXIT_REQUESTED;
-			} else if (commandId >= kMenuIdQuickLoginBase &&
-					   commandId < kMenuIdQuickLoginBase + kTrayMaxAccountItems) {
+			} else if (commandId >= kMenuIdQuickLoginBase && commandId < kMenuIdQuickLoginBase + kTrayMaxAccountItems) {
 				const UINT index = commandId - kMenuIdQuickLoginBase;
 				if (index < m_model.AccountCount) {
 					m_pendingEvent = ETrayEventType::TRAY_EVENT_QUICK_LOGIN;

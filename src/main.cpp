@@ -183,7 +183,10 @@ void BuildTrayMenu(void *pUserData, TrayMenuModel &outModel)
 		for (std::uint32_t q = 0; q < visibleCount && outModel.AccountCount < kTrayMaxAccountItems; q += 1) {
 			const CAccount &account = pCarousel->GetBanner(refs[q].BannerIndex).Accounts[refs[q].AccountIndex];
 			TrayAccountItem &item = outModel.Accounts[outModel.AccountCount];
-			StringViewCopyToFixed(item.Username, sizeof(item.Username), account.GetUsername());
+			// The note names the account the way its owner thinks of it; the username is
+			// the fallback for a row that never got one - see TrayAccountItem::Label.
+			const CStringView note = account.GetNote();
+			StringViewCopyToFixed(item.Label, sizeof(item.Label), note.Length > 0 ? note : account.GetUsername());
 			item.BannerIndex = static_cast<std::int32_t>(b);
 			item.QueryIndex = static_cast<std::int32_t>(q);
 			outModel.AccountCount += 1;

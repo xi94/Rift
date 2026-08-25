@@ -669,6 +669,11 @@ void CAccountModal::StartEditAccount(std::uint32_t queryIndex)
 	m_gameSelect.Close();
 }
 
+bool CAccountModal::CanSaveEditedAccount() const
+{
+	return m_editUsername.GetValue().Length > 0 && m_editPassword.GetValue().Length > 0;
+}
+
 bool CAccountModal::GetAccountCopyFields(std::uint32_t queryIndex, const char *&outUsername,
 										 const char *&outPassword) const
 {
@@ -952,7 +957,7 @@ bool CAccountModal::OnPointerUp(float x, float y)
 		const Rect save = LoginButtonRect(layout.Footer);
 		if (RectContainsPoint(EditCancelButtonRect(save), x, y)) {
 			m_mode = EAccountModalMode::ACCOUNT_MODAL_MODE_ACCOUNT_LIST;
-		} else if (m_editUsername.GetValue().Length > 0 && RectContainsPoint(save, x, y)) {
+		} else if (CanSaveEditedAccount() && RectContainsPoint(save, x, y)) {
 			if (haveBanner) {
 				if (m_nEditAccountIndex < 0) {
 					m_carousel.AddAccount(bannerIndex, m_editUsername.GetValue(), m_editNote.GetValue(),
@@ -1083,7 +1088,7 @@ ECursorKind CAccountModal::GetDesiredCursor() const
 		if (RectContainsPoint(EditCancelButtonRect(save), m_flMouseX, m_flMouseY)) {
 			return ECursorKind::CURSOR_HAND;
 		}
-		if (m_editUsername.GetValue().Length > 0 && RectContainsPoint(save, m_flMouseX, m_flMouseY)) {
+		if (CanSaveEditedAccount() && RectContainsPoint(save, m_flMouseX, m_flMouseY)) {
 			return ECursorKind::CURSOR_HAND;
 		}
 		if (m_nEditAccountIndex >= 0 &&
@@ -1550,9 +1555,17 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 	drawList.AddRectFilled(footer.X, footer.Y, footer.W, 1.0f, ColorFadeAlpha(Color{48, 48, 53, 255}, alpha));
 
 	if (m_mode == EAccountModalMode::ACCOUNT_MODAL_MODE_EDIT_ACCOUNT) {
-		const CStringView helperText = m_nEditAccountIndex < 0
-										   ? StringViewFromCString("Fill in the new account's details")
-										   : StringViewFromCString("Edit the account's details");
+		// While Save is disabled the helper line says why, rather than describing the form in
+		// general - a greyed-out button with no stated reason is the most common way a form
+		// wastes someone's time.
+		CStringView helperText = m_nEditAccountIndex < 0 ? StringViewFromCString("Fill in the new account's details")
+														 : StringViewFromCString("Edit the account's details");
+		if (!CanSaveEditedAccount()) {
+			helperText = m_editUsername.GetValue().Length == 0 && m_editPassword.GetValue().Length == 0
+							 ? StringViewFromCString("Username and password are required")
+							 : (m_editUsername.GetValue().Length == 0 ? StringViewFromCString("Username is required")
+																	  : StringViewFromCString("Password is required"));
+		}
 		// Starts past the Delete button when it's showing (editing an existing row) so
 		// the two never overlap.
 		const float helperX = m_nEditAccountIndex < 0
@@ -1563,7 +1576,7 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 				 ColorFadeAlpha(kColorTextFaint, alpha));
 
 		const Rect save = LoginButtonRect(footer);
-		const bool saveEnabled = m_editUsername.GetValue().Length > 0;
+		const bool saveEnabled = CanSaveEditedAccount();
 		const bool hoverSave = saveEnabled && RectContainsPoint(save, m_flMouseX, m_flMouseY);
 		const Color saveColor = !saveEnabled
 									? Color{60, 58, 70, 255}

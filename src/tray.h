@@ -36,7 +36,11 @@ struct TrayGameItem {
 // account index. That pairing is what CAccountModal::OpenForQuickLogin expects, and it is
 // what makes a cross-visible account log into the game the user actually picked it under.
 struct TrayAccountItem {
-	char Username[64];
+	// What the row says: the account's note when it has one, otherwise its username (see
+	// main.cpp's BuildTrayMenu). The note is the name a person actually gave the account -
+	// "main", "smurf", "eu west" - so it identifies the row better than a login ever does,
+	// and falling back means a row is never blank. Sized for the longer of the two.
+	char Label[64];
 	std::int32_t BannerIndex;
 	std::int32_t QueryIndex;
 };

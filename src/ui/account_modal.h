@@ -160,6 +160,13 @@ class CAccountModal : public CWidget {
 	PendingHit ConsumePendingRightClickRow();
 
   private:
+	// Whether the edit form's Save is live: a username and a password are both required (an
+	// account missing either can't log in, which is the only thing this app does with one),
+	// while the note stays optional - it's a label for the reader, not a credential. The one
+	// place that rule is written, since the click handler, the cursor, and the button's own
+	// enabled/disabled painting all have to agree about it.
+	bool CanSaveEditedAccount() const;
+
 	// --- Layout: the full panel geometry chain, computed once per call and shared by
 	// every hit-test/draw function below instead of each independently re-deriving it
 	// (mirrors CCarousel's own "private methods, not free functions, since C++ has no
