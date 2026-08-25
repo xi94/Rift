@@ -236,42 +236,41 @@ void DrawStatusBarVersion(CDrawList &drawList, CFontManager &fonts, float status
 
 void RenderFrame(RenderContext &context)
 {
-	CWindow &window = *context.pWindow;
-	const float width = static_cast<float>(window.GetWidth());
-	const float height = static_cast<float>(window.GetHeight());
+	  CWindow &window = *context.pWindow;
+	  const float width = static_cast<float>(window.GetWidth());
+	  const float height = static_cast<float>(window.GetHeight());
 
-	context.pDrawList->Clear();
+	  context.pDrawList->Clear();
 
-	// The title bar/status bar chrome - including the version number (DrawStatusBarVersion)
-	// - stays visible even on the master-password screen now, not just once unlocked: only
-	// the carousel's own content (its cards, and the view-mode text this same bar's right
-	// side shows - see DrawStatusBarContent) actually waits on m_bVisible, which main.cpp
-	// keeps in sync with the unlock state independently of this chrome.
-	context.pDrawList->AddRectFilled(0.0f, kTitleBarHeight, width, 1.0f, kColorChromeSeam);
-	context.pDrawList->AddRectFilled(0.0f, height - kStatusBarHeight - 1.0f, width, 1.0f, kColorChromeSeam);
-	context.pDrawList->AddRectFilled(0.0f, height - kStatusBarHeight, width, kStatusBarHeight, kTitleBarColor);
-	DrawStatusBarVersion(*context.pDrawList, *context.pFonts, height - kStatusBarHeight, kStatusBarHeight);
-	if (context.pCarousel->m_bVisible) {
-		context.pCarousel->DrawStatusBarContent(*context.pDrawList);
-	}
+	  // The title bar/status bar chrome - including the version number (DrawStatusBarVersion)
+	  // - stays visible even on the master-password screen now, not just once unlocked: only
+	  // the carousel's own content (its cards, and the view-mode text this same bar's right
+	  // side shows - see DrawStatusBarContent) actually waits on m_bVisible, which main.cpp
+	  // keeps in sync with the unlock state independently of this chrome.
+	  context.pDrawList->AddRectFilled(0.0f, kTitleBarHeight, width, 1.0f, kColorChromeSeam);
+	  context.pDrawList->AddRectFilled(0.0f, height - kStatusBarHeight - 1.0f, width, 1.0f, kColorChromeSeam);
+	  context.pDrawList->AddRectFilled(0.0f, height - kStatusBarHeight, width, kStatusBarHeight, kTitleBarColor);
+	  DrawStatusBarVersion(*context.pDrawList, *context.pFonts, height - kStatusBarHeight, kStatusBarHeight);
+	  if (context.pCarousel->m_bVisible) {
+		    context.pCarousel->DrawStatusBarContent(*context.pDrawList);
+	  }
 
-	context.pStack->Draw(*context.pDrawList);
-	context.pDrawList->Finish();
+	  context.pStack->Draw(*context.pDrawList);
+	  context.pDrawList->Finish();
 
-	context.pRenderer->BeginFrame();
-	context.pRenderer->Clear(kColorBackground);
-	SubmitDrawList(*context.pRenderer, *context.pDrawList);
-	context.pRenderer->EndFrame();
+	  context.pRenderer->BeginFrame();
+	  context.pRenderer->Clear(kColorBackground);
+	  SubmitDrawList(*context.pRenderer, *context.pDrawList);
+	  context.pRenderer->EndFrame();
 }
 
 // Called synchronously from WM_SIZE while a border drag is in progress.
 void OnWindowResize(void *pUserData)
 {
-	auto *pContext = static_cast<RenderContext *>(pUserData);
-	pContext->pRenderer->Resize(pContext->pWindow->GetPhysicalWidth(), pContext->pWindow->GetPhysicalHeight(),
-								static_cast<float>(pContext->pWindow->GetWidth()),
-								static_cast<float>(pContext->pWindow->GetHeight()));
-	RenderFrame(*pContext);
+    auto *pContext = static_cast<RenderContext *>(pUserData);
+    // hmmmmm
+    pContext->pRenderer->Resize(pContext->pWindow->GetPhysicalWidth(), pContext->pWindow->GetPhysicalHeight(), static_cast<float>(pContext->pWindow->GetWidth()), static_cast<float>(pContext->pWindow->GetHeight()));
+	  RenderFrame(*pContext);
 }
 
 // Bundles the extra state OnWindowDpiChanged needs beyond RenderContext - the font
@@ -307,7 +306,7 @@ int main(int argc, char *argv[])
 	// process instance has nothing further to do (it either just relaunched a repaired copy
 	// of itself, or there's nothing for it to do at all) - main() ends here, full stop.
 	if (CUpdater::RunStartupRecoveryAndMaybeExit()) {
-		return 0;
+		  return 0;
 	}
 
 	// Before literally anything else - see crash_handler.h's own file comment. Every mechanism
@@ -321,14 +320,14 @@ int main(int argc, char *argv[])
 	// early, before any worker thread exists (see sodium_init's own docs: it's not safe to
 	// call concurrently with any other libsodium function, only with itself).
 	if (sodium_init() < 0) {
-		std::println("Failed to initialize libsodium.");
-		return 1;
+	  	std::println("Failed to initialize libsodium.");
+		  return 1;
 	}
 
 	CMemoryArena persistentArena;
 	if (!persistentArena.Init(kPersistentArenaCapacity)) {
-		std::println("Failed to reserve persistent arena.");
-		return 1;
+		  std::println("Failed to reserve persistent arena.");
+		  return 1;
 	}
 
 	// Read just the window size ahead of everything else settings-related below (CSettings
@@ -343,33 +342,33 @@ int main(int argc, char *argv[])
 
 	CWindow window;
 	if (!window.Create(L"Rift", bootSettings.m_nWindowWidth, bootSettings.m_nWindowHeight)) {
-		std::println("Failed to create window.");
-		return 1;
+		  std::println("Failed to create window.");
+		  return 1;
 	}
 
 	CRendererD3D11 renderer;
 	const RendererConfig rendererConfig{window.GetHandle(), window.GetPhysicalWidth(), window.GetPhysicalHeight(),
 										static_cast<float>(window.GetWidth()), static_cast<float>(window.GetHeight())};
 	if (!renderer.Init(rendererConfig)) {
-		std::println("Failed to initialize renderer.");
-		return 1;
+		  std::println("Failed to initialize renderer.");
+		  return 1;
 	}
 
 	CAssetManager assets;
 	if (!assets.Load(renderer)) {
-		std::println("Failed to load one or more embedded assets.");
-		return 1;
+		  std::println("Failed to load one or more embedded assets.");
+		  return 1;
 	}
 
 	CFontManager fonts;
 	if (!fonts.Load(renderer, window.GetDpiScale())) {
-		std::println("Failed to load the UI font.");
-		return 1;
+		  std::println("Failed to load the UI font.");
+		  return 1;
 	}
 
 	CTray tray;
 	if (!tray.Create(L"Rift")) {
-		std::println("Failed to create tray icon.");
+		  std::println("Failed to create tray icon.");
 	}
 
 	CDrawList drawList;

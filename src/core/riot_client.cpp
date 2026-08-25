@@ -1,12 +1,16 @@
 #include "core/riot_client.h"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <thread>
+#include <vector>
 
 #include <TlHelp32.h>
 
 #include <nlohmann/json.hpp>
+
+#include "core/thread_util.h"
 
 namespace {
 constexpr const char *kInstallsJsonPath = "C:\\ProgramData\\Riot Games\\RiotClientInstalls.json";
@@ -89,6 +93,51 @@ bool AnyProcessNameMatches(const wchar_t *const *pNames, std::size_t nameCount)
 	return found;
 }
 
+// How long KillProcessesByName gives the processes it terminated to actually be gone before it
+// stops waiting and lets the caller carry on regardless. Generous: a Riot Client tree normally
+// unwinds in well under this, and the cost of being wrong in the other direction (see that
+// function's own comment) is an attempt that hangs until the user cancels it.
+constexpr auto kProcessExitTimeout = std::chrono::milliseconds(3000);
+
+// Waits (bounded, against one shared deadline) for every handle in processes to signal, then
+// closes them all - the handles are consumed either way, whether the wait succeeded or timed out.
+void WaitForProcessesToExit(std::vector<HANDLE> &processes, std::chrono::milliseconds timeout)
+{
+	const auto deadline = std::chrono::steady_clock::now() + timeout;
+
+	// WaitForMultipleObjects tops out at MAXIMUM_WAIT_OBJECTS handles at a time, and a Riot
+	// Client tree mid-teardown can genuinely exceed that (its Electron shell spawns a renderer,
+	// a gpu-process and a crashpad-handler of its own, and League's lobby client does the same),
+	// so this waits in batches - all against the one deadline computed above, rather than
+	// handing each batch its own full timeout.
+	for (std::size_t offset = 0; offset < processes.size(); offset += MAXIMUM_WAIT_OBJECTS) {
+		const DWORD count =
+			static_cast<DWORD>(std::min<std::size_t>(MAXIMUM_WAIT_OBJECTS, processes.size() - offset));
+		const auto now = std::chrono::steady_clock::now();
+		const DWORD remainingMs =
+			now >= deadline
+				? 0
+				: static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
+		WaitForMultipleObjects(count, processes.data() + offset, TRUE, remainingMs);
+	}
+
+	for (const HANDLE process : processes) {
+		CloseHandle(process);
+	}
+	processes.clear();
+}
+
+// Terminates every running process whose image name matches one of pNames, then waits (bounded -
+// see kProcessExitTimeout) for them to actually be gone.
+//
+// That wait is load-bearing, not tidiness: TerminateProcess only *requests* termination and
+// returns immediately, so without it this function comes back while the old client is still
+// unwinding - and CRiotClient::Launch runs straight into a Riot Client that is still holding its
+// own single-instance lock. The new instance then hands off to the dying one and exits, no new
+// window ever appears, and the caller's WaitForWindow (unbounded by design - see
+// core/login_attempt.cpp) waits for something that is never coming until the user cancels it.
+// Windows also outlive their process only until it finishes tearing down, so waiting here is
+// equally what keeps FindClientWindow from latching onto the old client's about-to-vanish HWND.
 void KillProcessesByName(const wchar_t *const *pNames, std::size_t nameCount)
 {
 	const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -96,6 +145,7 @@ void KillProcessesByName(const wchar_t *const *pNames, std::size_t nameCount)
 		return;
 	}
 
+	std::vector<HANDLE> terminated;
 	PROCESSENTRY32W entry{.dwSize = sizeof(entry)};
 	if (Process32FirstW(snapshot, &entry)) {
 		do {
@@ -106,15 +156,23 @@ void KillProcessesByName(const wchar_t *const *pNames, std::size_t nameCount)
 			if (!matches) {
 				continue;
 			}
-			// Best-effort - see this file's own header comment on KillAllClientProcesses.
-			const HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE, entry.th32ProcessID);
-			if (process != nullptr) {
-				TerminateProcess(process, 0);
+			// SYNCHRONIZE alongside PROCESS_TERMINATE purely so the handle can be waited on
+			// below. Best-effort either way - see this file's own header comment on
+			// KillAllClientProcesses.
+			const HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, entry.th32ProcessID);
+			if (process == nullptr) {
+				continue;
+			}
+			if (TerminateProcess(process, 0)) {
+				terminated.push_back(process); // WaitForProcessesToExit closes it
+			} else {
 				CloseHandle(process);
 			}
 		} while (Process32NextW(snapshot, &entry));
 	}
 	CloseHandle(snapshot);
+
+	WaitForProcessesToExit(terminated, kProcessExitTimeout);
 }
 
 // UTF-8 (this project's own string convention - see core/string_view.h) -> UTF-16, the one the
@@ -158,12 +216,19 @@ bool IsWindowResponsive(HWND hWnd, std::uint32_t timeoutMs)
 	return SendMessageTimeoutW(hWnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, timeoutMs, &probeResult) != 0;
 }
 
-// Shared by BringToForeground/SetKeyboardFocus: temporarily attaches this thread's input queue
-// to hWnd's owning thread's, since Windows otherwise silently ignores SetForegroundWindow/
-// SetFocus calls aimed at a window from a thread that isn't already part of the foreground
-// thread's input queue (the SPI_FOREGROUNDLOCKTIMEOUT policy). RAII so every early-return below
-// still detaches. Skips attaching to an unresponsive target - see IsWindowResponsive: not
-// attaching just means the client may not come to the front, which callers already tolerate.
+// Temporarily attaches the calling thread's input queue to hWnd's owning thread's, since Windows
+// otherwise silently ignores SetForegroundWindow/SetFocus calls aimed at a window from a thread
+// that isn't already part of the foreground thread's input queue (the SPI_FOREGROUNDLOCKTIMEOUT
+// policy). RAII so every early-return still detaches. Skips attaching to an unresponsive target -
+// see IsWindowResponsive: not attaching just means the client may not come to the front, which
+// callers already tolerate.
+//
+// Only ever constructed on ActivateWindowBounded's throwaway thread, never on a caller's own -
+// both AttachThreadInput calls here are unbounded synchronous trips into hWnd's owning thread,
+// and the probe above is not the guard it looks like (see RunBoundedOrAbandon's own comment in
+// core/thread_util.h). Note also that once TRUE succeeds the two threads share one input queue,
+// so a target that wedges *after* that point hangs the matching detach below just as solidly -
+// which is precisely why the thread this runs on has to be one nothing needs back.
 class ScopedThreadInputAttach {
   public:
 	explicit ScopedThreadInputAttach(HWND hWnd)
@@ -193,6 +258,46 @@ class ScopedThreadInputAttach {
 	DWORD m_currentThreadId = 0;
 	bool m_bAttached = false;
 };
+
+// How long one ActivateWindowNow pass gets before it's written off as wedged - see
+// ActivateWindowBounded. Long enough that an ordinarily slow activation (a cold Electron client
+// still bringing its renderer up) still lands normally, short enough that a genuinely stuck one
+// doesn't dominate an attempt's own timeouts.
+constexpr auto kActivateTimeout = std::chrono::milliseconds(3000);
+
+// The whole "put this window in front, optionally give it keyboard focus" pass - every call in
+// here is an unbounded synchronous trip through hWnd's own window procedure, so this only ever
+// runs via ActivateWindowBounded, never inline on a caller's thread.
+//
+// SwitchToThisWindow used to sit alongside these as a belt-and-suspenders second activation. It
+// is gone deliberately: it's undocumented, it duplicates what SetForegroundWindow/
+// BringWindowToTop already do, and being a full activation it is one more unbounded wndproc
+// round trip for no coverage the two documented calls don't already give.
+void ActivateWindowNow(HWND hWnd, bool bAlsoFocus)
+{
+	const ScopedThreadInputAttach attach(hWnd);
+
+	if (IsIconic(hWnd)) {
+		ShowWindow(hWnd, SW_RESTORE);
+	}
+	SetForegroundWindow(hWnd);
+	BringWindowToTop(hWnd);
+	if (bAlsoFocus) {
+		// Only meaningful while the attach above is still in effect - SetFocus aimed at another
+		// thread's window does nothing at all otherwise.
+		SetFocus(hWnd);
+	}
+}
+
+// ActivateWindowNow, bounded: returns whether the pass actually completed. False means it's
+// still stuck inside the client's own window procedure on a thread that has been abandoned -
+// the client just doesn't come forward, which is a cosmetic loss both callers already tolerate,
+// rather than the whole login worker freezing where nothing but CLoginAttempt's cancel watchdog
+// can ever get it back.
+bool ActivateWindowBounded(HWND hWnd, bool bAlsoFocus)
+{
+	return RunBoundedOrAbandon([hWnd, bAlsoFocus]() { ActivateWindowNow(hWnd, bAlsoFocus); }, kActivateTimeout);
+}
 
 // Best-effort wait for element to actually receive OS-level keyboard focus after a SetFocus()
 // call on it - confirmed necessary against a real install, not a hypothetical:
@@ -397,15 +502,7 @@ bool CRiotClient::BringToForeground(std::uint32_t timeoutMs, const std::atomic<b
 		return false;
 	}
 
-	const ScopedThreadInputAttach attach(hWnd);
-
-	if (IsIconic(hWnd)) {
-		ShowWindow(hWnd, SW_RESTORE);
-	}
-	const bool result = SetForegroundWindow(hWnd) != 0;
-	BringWindowToTop(hWnd);
-	SwitchToThisWindow(hWnd, TRUE); // belt-and-suspenders alongside SetForegroundWindow above
-	return result;
+	return ActivateWindowBounded(hWnd, false);
 }
 
 bool CRiotClient::SetKeyboardFocus(std::uint32_t timeoutMs, const std::atomic<bool> *pCancelRequested) const
@@ -415,9 +512,7 @@ bool CRiotClient::SetKeyboardFocus(std::uint32_t timeoutMs, const std::atomic<bo
 		return false;
 	}
 
-	const ScopedThreadInputAttach attach(hWnd);
-	SetFocus(hWnd);
-	return true;
+	return ActivateWindowBounded(hWnd, true);
 }
 
 bool CRiotClient::SubmitLogin(const CUiAutomation &uiAutomation, CStringView username, CStringView password,

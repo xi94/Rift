@@ -89,11 +89,19 @@ class CRiotClient {
 	static bool IsGameInProgress();
 
 	// Terminates every currently-running process this project knows how to relaunch cleanly -
-	// the Riot Client's own process tree, League's lobby client, and Legends of Runeterra.
+	// the Riot Client's own process tree, League's lobby client, and Legends of Runeterra -
+	// and then waits (bounded, a few seconds) for them to actually be gone before returning.
 	// Best-effort: a process this can't open (already exiting, insufficient rights) is simply
 	// skipped, not treated as a hard failure - Launch()/WaitForWindow afterward will surface a
 	// real problem if one of these somehow survives and interferes. Never touches a game
 	// process itself - see IsGameInProgress, checked separately by the caller.
+	//
+	// The wait matters to callers: TerminateProcess only requests termination, so returning
+	// before the old client is really gone means Launch() immediately afterward races its
+	// single-instance lock (the new instance hands off to the dying one and exits, leaving
+	// nothing for WaitForWindow to ever find) and FindClientWindow can still resolve the old
+	// client's about-to-be-destroyed window. Callers are therefore expected to call this and
+	// then launch, without any settling delay of their own.
 	static void KillAllClientProcesses();
 
 	// Maps this project's own carousel banner titles (see main.cpp's seeded CCarousel
@@ -145,13 +153,23 @@ class CRiotClient {
 	// window showing up.
 	bool WaitForWindow(std::uint32_t timeoutMs, const std::atomic<bool> *pCancelRequested = nullptr) const;
 
-	// SetForegroundWindow (with the AttachThreadInput trick actually needed to make it succeed
-	// when this process isn't already the foreground one - Windows silently ignores a bare
-	// SetForegroundWindow call from a background process by design, the
-	// SPI_FOREGROUNDLOCKTIMEOUT policy) plus SwitchToThisWindow as a second, belt-and-suspenders
-	// call alongside it. Retries (see this file's own comment on why nothing here trusts a
-	// single lookup) until a window is found, timeoutMs elapses, or pCancelRequested is
+	// SetForegroundWindow plus BringWindowToTop, with the AttachThreadInput trick actually
+	// needed to make them succeed when this process isn't already the foreground one - Windows
+	// silently ignores a bare SetForegroundWindow call from a background process by design, the
+	// SPI_FOREGROUNDLOCKTIMEOUT policy. Retries (see this file's own comment on why nothing here
+	// trusts a single lookup) until a window is found, timeoutMs elapses, or pCancelRequested is
 	// observed true.
+	//
+	// Best-effort, and the return value says so: true only if the activation actually completed.
+	// Every one of those Win32 calls is an unbounded synchronous trip through the Riot Client's
+	// OWN window procedure, which a cold-starting Electron client can sit inside indefinitely
+	// (synchronous cross-process IPC in its activation handling) with no cancellation point
+	// anything on this side can reach - so the whole pass runs on a throwaway thread this gives
+	// up on after a few seconds rather than on the caller's. False therefore means "the client
+	// didn't come forward", never "the caller is now stuck": callers are expected to carry on
+	// regardless, which is what core/login_attempt.cpp's worker does at both call sites. See
+	// RunBoundedOrAbandon in core/thread_util.h for why a responsiveness probe can't substitute
+	// for that bound.
 	bool BringToForeground(std::uint32_t timeoutMs = kDefaultActionTimeoutMs,
 						   const std::atomic<bool> *pCancelRequested = nullptr) const;
 
@@ -159,7 +177,8 @@ class CRiotClient {
 	// CUiElement::SetFocus for that), via the same AttachThreadInput approach
 	// BringToForeground uses - typically called right after it, before any UI Automation
 	// lookup, so synthesized keyboard input (CUiAutomation::SendKeystrokes/SendKey) has
-	// somewhere to land. Same retry shape as BringToForeground, including pCancelRequested.
+	// somewhere to land. Same retry shape as BringToForeground, including pCancelRequested,
+	// and the same bounded best-effort return value - see that method's own comment.
 	bool SetKeyboardFocus(std::uint32_t timeoutMs = kDefaultActionTimeoutMs,
 						  const std::atomic<bool> *pCancelRequested = nullptr) const;
 
