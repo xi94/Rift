@@ -12,7 +12,7 @@ constexpr float kPopupWidth = 220.0f;
 constexpr float kPopupPadding = 6.0f;
 constexpr float kPopupRadius = 10.0f;
 constexpr float kWindowMargin = 8.0f;
-constexpr float kAnchorGap = 6.0f; // gap between the chip and the popup, now a horizontal gap - see PopupRect
+constexpr float kAnchorGap = 6.0f; // vertical gap between the chip and the popup below it - see PopupRect
 constexpr float kRowPaddingX = 10.0f;
 constexpr float kOpenEaseRate = 20.0f; // a quick micro-interaction, similar to a toggle switch's own ease rate
 
@@ -65,23 +65,29 @@ bool IsLockedRow(std::uint16_t mask, std::uint32_t index)
 // is relative to bounds' own edges, not the screen/window origin, so this works
 // correctly regardless of where bounds itself sits on screen.
 //
-// Anchored to the right of anchor (the chip), top-aligned with it - not below/above, see
-// this file's own header comment for why the old below-then-flip-above layout was
-// replaced. openAmount (0..1, eased - CGameSelectPopup::m_flOpenAmount) animates the
-// height from 0 up to its full resting value while X/Y/W stay fixed, so the box visibly
-// "folds out" downward from the chip's own top edge; Draw's clip rect (scoped to this
-// same growing rect) is what keeps not-yet-revealed rows - always laid out at their final
-// position, never actually moved - from poking out past it mid-animation.
+// Below the anchor (the chip) and right-aligned to it, so the box hangs off the chip and
+// unfolds down-and-left over the form - see this file's own header comment. openAmount
+// (0..1, eased - CGameSelectPopup::m_flOpenAmount) animates the height from 0 up to its
+// full resting value while X/Y/W stay fixed, so the box visibly "folds out" downward from
+// its own top edge; Draw's clip rect (scoped to this same growing rect) is what keeps
+// not-yet-revealed rows - always laid out at their final position, never actually moved -
+// from poking out past it mid-animation.
+//
+// Only the resting height is clamped against bounds, never the animating one: clamping the
+// growing height would slide the box upward frame by frame as it unfolded, which reads as
+// the popup drifting rather than opening.
 Rect PopupRect(Rect anchor, std::uint32_t bannerCount, const CFontManager &fonts, Rect bounds, float openAmount)
 {
 	const float fullHeight =
 		kPopupPadding * 2.0f + RowHeightFor(fonts) * static_cast<float>(std::max<std::uint32_t>(1, bannerCount));
 
-	float x = anchor.X + anchor.W + kAnchorGap;
+	// Right edges flush, then clamped so a narrow column can't push the box off its left
+	// side - the popup is wider than the chip, so it always overhangs to the left.
+	float x = anchor.X + anchor.W - kPopupWidth;
 	x = std::clamp(x, bounds.X + kWindowMargin,
 				   std::max(bounds.X + kWindowMargin, bounds.X + bounds.W - kWindowMargin - kPopupWidth));
 
-	const float y = std::clamp(anchor.Y, bounds.Y + kWindowMargin,
+	const float y = std::clamp(anchor.Y + anchor.H + kAnchorGap, bounds.Y + kWindowMargin,
 							   std::max(bounds.Y + kWindowMargin, bounds.Y + bounds.H - kWindowMargin - fullHeight));
 
 	return Rect{x, y, kPopupWidth, fullHeight * openAmount};
@@ -198,8 +204,9 @@ void CGameSelectPopup::Draw(CDrawList &drawList)
 										  locked ? ColorFadeAlpha(banner.Accent, 140) : banner.Accent);
 		}
 
-		DrawText(drawList, secondary, iconRect.X + iconRect.W + 10.0f, row.Y + (row.H + secondary.GetAscent()) * 0.5f,
-				 banner.Title, locked ? kColorTextDisabled : kColorText);
+		DrawText(drawList, secondary, iconRect.X + iconRect.W + 10.0f,
+				 row.Y + row.H * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f, banner.Title,
+				 locked ? kColorTextDisabled : kColorText);
 
 		if ((m_uMask & (1u << i)) != 0) {
 			DrawCheck(drawList, row, iconSize / 20.0f, locked ? kColorCheckDisabled : kColorCheck);

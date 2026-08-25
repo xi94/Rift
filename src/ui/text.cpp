@@ -77,6 +77,44 @@ void DrawCenteredText(CDrawList &list, const CFont &font, float x, float y, floa
 					  Color color)
 {
 	const float textW = TextWidth(font, text);
-	const float baselineY = y + (h + font.GetAscent()) * 0.5f;
+	// The glyphs' own visual center on the box's center - ascent alone would ignore how far
+	// descenders hang below the baseline (GetDescent is negative, see font.h) and sit every
+	// label in the app a couple of pixels low inside its button.
+	const float baselineY = y + h * 0.5f + (font.GetAscent() + font.GetDescent()) * 0.5f;
 	DrawText(list, font, x + (w - textW) * 0.5f, baselineY, text, color);
+}
+
+void DrawTextEllipsized(CDrawList &list, const CFont &font, float x, float y, CStringView text, float maxWidth,
+						Color color)
+{
+	if (maxWidth <= 0.0f) {
+		return;
+	}
+	if (TextWidth(font, text) <= maxWidth) {
+		DrawText(list, font, x, y, text, color);
+		return;
+	}
+
+	const CStringView ellipsis = StringViewFromCString("...");
+	const float ellipsisWidth = TextWidth(font, ellipsis);
+	// Not even the ellipsis fits - drawing a lone "..." in a sliver of space says less
+	// than drawing nothing at all, and can still overhang what's beside it.
+	if (ellipsisWidth > maxWidth) {
+		return;
+	}
+
+	// Longest prefix that still leaves room for the ellipsis. Linear from the front rather
+	// than a binary search: these are short single-line labels, and walking forward is the
+	// only way to stay correct if TextWidth ever stops being a plain sum of advances.
+	std::uint64_t fit = 0;
+	while (fit < text.Length) {
+		const float width = TextWidth(font, CStringView{text.pData, fit + 1});
+		if (width + ellipsisWidth > maxWidth) {
+			break;
+		}
+		fit += 1;
+	}
+
+	DrawText(list, font, x, y, CStringView{text.pData, fit}, color);
+	DrawText(list, font, x + TextWidth(font, CStringView{text.pData, fit}), y, ellipsis, color);
 }

@@ -316,7 +316,12 @@ void CTextInput::Draw(CDrawList &drawList, const CFont &font, float x, float y, 
 		drawList.AddRectFilled(startX, y + 4.0f, endX - startX, h - 8.0f, ColorFadeAlpha(caretColor, 70));
 	}
 
-	const float baselineY = y + (h + font.GetAscent()) * 0.5f;
+	// The value's own visual center on the box's center: baseline = center + (ascent +
+	// descent) / 2, with descent negative (see font.h). The old (h + ascent) * 0.5f form
+	// left out the descent term entirely, which sat every typed value in this project
+	// visibly low in its box - most obvious in the account form's tall fields, where the
+	// text looked like it was resting on the bottom border rather than centered.
+	const float baselineY = y + h * 0.5f + (font.GetAscent() + font.GetDescent()) * 0.5f;
 	DrawText(drawList, font, x + kTextPadding, baselineY, value, textColor);
 
 	if (!m_bFocused) {

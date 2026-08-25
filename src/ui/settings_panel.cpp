@@ -1,11 +1,13 @@
 #include "ui/settings_panel.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
 #include <Windows.h>
 
+#include "asset_manager.h"
 #include "core/animator.h"
 #include "gfx/font.h"
 #include "ui/draw_list.h"
@@ -16,35 +18,78 @@
 namespace {
 constexpr float kPanelOpenEaseRate = 16.0f;
 constexpr float kToggleEaseRate = 18.0f;
+// How fast the eased display copies of the numeric/color settings chase the real value -
+// see CSettingsPanel's own m_flFontSizeDisplay. Close to the toggle rate on purpose: a
+// row's control and its toggle-switch neighbours should settle at the same pace.
+constexpr float kValueEaseRate = 16.0f;
 
 // Base panel size, tuned at kReferenceBodyPixelHeight - PanelMaxSizeScale grows both
 // in lockstep with a larger Font Size setting (see CAccountModal, which does the same
 // thing) so bigger text gets more room instead of being clipped/overlapping at the
 // original size.
-constexpr float kPanelMaxWidthBase = 520.0f;
+// Wider than the 520 this shipped at: every row gained a reset button to the left of
+// its control (see ResetButtonRect), and the label column shouldn't pay for it.
+constexpr float kPanelMaxWidthBase = 570.0f;
 // A comfortable viewport, not "tall enough to fit every row" - the row list scrolls
 // once it overflows this, so it doesn't need to grow every time a row is added.
-constexpr float kPanelMaxHeightBase = 460.0f;
+constexpr float kPanelMaxHeightBase = 480.0f;
 // Real baked pixels (CFont::GetPixelHeight already includes CFontManager's display-
 // scale factor), matching the default CSettings::m_flFontPixelSize of 16 nominal
 // units - see kFontSizeMin/Max below for why the Settings-facing number isn't this.
 constexpr float kReferenceBodyPixelHeight = 24.0f;
+// The same real-baked-pixels figure for the secondary face, matching the default
+// CSettings::m_flSecondaryFontPixelSize of 12 nominal units - see PanelMaxSizeScale.
+constexpr float kReferenceSecondaryPixelHeight = 20.0f;
 constexpr float kPanelMargin = 48.0f;
 constexpr float kPanelScaleMin = 0.94f;
 constexpr float kPanelRadius = 16.0f;
 constexpr float kPanelBorderThickness = 1.5f;
 
-constexpr float kRowPaddingX = 24.0f;
+constexpr float kRowPaddingX = 26.0f;
 constexpr float kCloseSize = 26.0f;
 
-constexpr float kRowLabelTopGap = 8.0f;		// above the title line
-constexpr float kRowLabelLineGap = 4.0f;	// between the title and description lines
-constexpr float kRowLabelBottomGap = 10.0f; // below the description line
+// All three were tightened-up numbers (8/4/10) that left rows reading as one dense block
+// of text with the controls crowded against it. Every one of them is a gap *between*
+// things rather than a fixed row height, so raising them spaces the list out without any
+// row ever clipping its own contents at a larger Font Size - RowHeightFor is the sum of
+// these plus the two real line heights, and every control centers off the same metrics
+// (see RowControlCenterY).
+constexpr float kRowLabelTopGap = 14.0f;	// above the title line
+constexpr float kRowLabelLineGap = 6.0f;	// between the title and description lines
+constexpr float kRowLabelBottomGap = 16.0f; // below the description line
+
+// The hover highlight painted behind whichever row the cursor is over - inset from the
+// row's own padding so it reads as a band around the content rather than a full-bleed
+// stripe touching the panel's edges.
+constexpr float kRowHighlightInsetX = 12.0f;
+constexpr float kRowHighlightRadius = 8.0f;
+
+// A row's "restore this setting's default" button: a square icon button sitting just left
+// of that row's own control (matching FilePilot's settings list, which is where this
+// affordance comes from), so it never collides with the label text on the left or the
+// control on the right.
+constexpr float kResetButtonSize = 28.0f;
+constexpr float kResetButtonGap = 10.0f;
+constexpr float kResetIconSize = 18.0f;
+constexpr float kResetAppearRate = 20.0f;
+// How fast a clicked button's spin unwinds - deliberately slower than the fade so the
+// turn stays legible rather than being over before the eye lands on it.
+constexpr float kResetSpinRate = 6.0f;
+constexpr float kTwoPi = 6.28318530717958647692f;
+
+// Section headings ("Appearance", "Motion", ...) grouping the row list - a dim secondary-
+// font label plus the breathing room above it that actually does the grouping work.
+constexpr float kSectionHeaderTopGap = 22.0f;
+constexpr float kSectionHeaderBottomGap = 8.0f;
 
 constexpr float kSliderTrackWidth = 130.0f;
 constexpr float kSliderTrackVisualHeight = 6.0f;
 constexpr float kSliderThumbRadius = 8.0f;
 constexpr float kSliderValueLabelGap = 8.0f;
+// Reserved for the slider's own "1.00x" readout, left of the track - a fixed reservation
+// rather than the measured text width so the reset button left of it (see
+// SliderControlRect) doesn't shuffle sideways as the value's digit count changes.
+constexpr float kSliderValueLabelWidth = 48.0f;
 constexpr float kAnimationSpeedMin = 0.25f;
 constexpr float kAnimationSpeedMax = 3.0f;
 
@@ -65,18 +110,32 @@ constexpr Color kColorBg{26, 26, 29, 255};
 constexpr Color kColorBorder{70, 70, 76, 255};
 constexpr Color kColorText{224, 224, 228, 255};
 constexpr Color kColorTextDim{140, 140, 146, 255};
-constexpr Color kColorSeparator{44, 44, 48, 255};
+constexpr Color kColorSeparator{58, 58, 64, 255};
 constexpr Color kColorControlBg{40, 40, 45, 255};
 constexpr Color kColorToggleOff{70, 70, 76, 255};
+constexpr Color kColorRowHover{36, 36, 41, 255};
+// A reset button only exists while it does something (see UpdateResetButtons), so there's
+// no dimmed-but-present state to color for - just the resting icon and its hover, which is
+// a real step lighter than the row behind it rather than the barely-there tint it was.
+constexpr Color kColorResetIdle{150, 150, 158, 255};
+constexpr Color kColorResetHoverBg{64, 64, 72, 255};
 
 // Every size below derives from the active fonts' actual glyph metrics
 // (CFont::GetLineHeight: ascent+descent+line_gap, a real baseline-to-baseline
 // distance) instead of a fixed pixel constant, so a larger Font Size setting grows
 // rows/header/footer to fit instead of the title/description lines overlapping once
 // text no longer fits the original small-font layout.
+// Both faces, not just the body one: a row's description line is set in the secondary
+// face, and Secondary Font Size is independently adjustable (see kSecondaryFontSizeMax), so
+// scaling off body alone left the panel exactly as narrow as before while the longest text
+// on every row grew - which is how a description ended up running into the control beside
+// it. The secondary face is compared against its own smaller reference height so that a
+// default-sized secondary contributes a scale of 1.0 the same way a default body does.
 float PanelMaxSizeScale(const CFontManager &fonts)
 {
-	return std::max(1.0f, fonts.GetBody().GetPixelHeight() / kReferenceBodyPixelHeight);
+	const float bodyScale = fonts.GetBody().GetPixelHeight() / kReferenceBodyPixelHeight;
+	const float secondaryScale = fonts.GetSecondary().GetPixelHeight() / kReferenceSecondaryPixelHeight;
+	return std::max(1.0f, std::max(bodyScale, secondaryScale));
 }
 
 float HeaderHeightFor(const CFontManager &fonts)
@@ -102,6 +161,13 @@ float RowLabelBlockHeightFor(const CFontManager &fonts)
 float RowHeightFor(const CFontManager &fonts)
 {
 	return RowLabelBlockHeightFor(fonts);
+}
+
+// A section heading strip ("Appearance", "Motion", ...) - the same metrics-derived
+// sizing every other height here uses, so headings grow with Font Size too.
+float SectionHeaderHeightFor(const CFontManager &fonts)
+{
+	return kSectionHeaderTopGap + fonts.GetSecondary().GetLineHeight() + kSectionHeaderBottomGap;
 }
 
 // Body, not secondary: every control this sizes (the font-name field, the master
@@ -289,6 +355,27 @@ Rect SliderTrackRect(Rect row, const CFontManager &fonts)
 				kSliderTrackWidth, kH};
 }
 
+// The slider's full visual footprint - the draggable track plus the reserved space its
+// "1.00x" readout occupies to the left of it. SliderTrackRect alone is the hit rect; this
+// is what the reset button positions itself against, so the button lands left of the
+// readout instead of on top of it.
+Rect SliderControlRect(Rect row, const CFontManager &fonts)
+{
+	const Rect track = SliderTrackRect(row, fonts);
+	const float reserved = kSliderValueLabelGap + kSliderValueLabelWidth;
+	return Rect{track.X - reserved, track.Y, track.W + reserved, track.H};
+}
+
+// A row's reset button, immediately left of that row's own control. Deriving it from the
+// control (rather than pinning it to a fixed column) is what keeps it adjacent to the
+// thing it restores on every row, whether that control is a wide text field or a narrow
+// toggle - the arrangement FilePilot's own settings list uses.
+Rect ResetButtonRect(Rect control, Rect row, const CFontManager &fonts)
+{
+	return Rect{control.X - kResetButtonGap - kResetButtonSize, RowControlCenterY(row, fonts) - kResetButtonSize * 0.5f,
+				kResetButtonSize, kResetButtonSize};
+}
+
 float AnimationSpeedToT(float speed)
 {
 	return std::clamp((speed - kAnimationSpeedMin) / (kAnimationSpeedMax - kAnimationSpeedMin), 0.0f, 1.0f);
@@ -307,23 +394,33 @@ float AnimationSpeedFromT(float t)
 // row's height, independent of scrollOffset) is what the scrollbar needs to know
 // whether there's anything to scroll at all.
 struct SettingsRows {
+	Rect SectionAppearance;
 	Rect Font;
 	Rect FontSize;
 	Rect SecondaryFontSize;
-	Rect Animations;
+	Rect Accent;
 	Rect RoundedCorners;
+	Rect SectionMotion;
+	Rect Animations;
+	Rect AnimationSpeed;
+	Rect SectionPrivacy;
 	Rect ExcludeFromCapture;
 	Rect CloseToTray;
-	Rect AnimationSpeed;
-	Rect Accent;
+	Rect SectionSecurity;
 	Rect MasterPassword;
 	float ContentHeight;
 };
 
-// Walks the RectSplitTop cursor described above, in the fixed row order the panel
-// always draws in. Every row (including Master Password now - see this file's own
-// header comment) is a plain fixed-height row, so this needs no extra state from the
-// caller the way it once did to size the old tier sub-layout.
+// Walks the RectSplitTop cursor described above, in the fixed order the panel always
+// draws in. Every row (including Master Password now - see this file's own header
+// comment) is a plain fixed-height row, so this needs no extra state from the caller the
+// way it once did to size the old tier sub-layout. Rows are grouped under section
+// headings rather than listed in one undifferentiated stack: what a setting actually
+// affects (how the app looks, how it moves, what it keeps private) is the only ordering a
+// reader can navigate by, and each heading carves its own strip off this same cursor, so a
+// heading can no more overlap a row than two rows can overlap each other. The first
+// heading gets a smaller top gap than the rest - there's no preceding group for it to
+// separate from, just the header rule right above it.
 SettingsRows ComputeRows(Rect scrollRegion, float scrollOffset, const CFontManager &fonts)
 {
 	SettingsRows rows{};
@@ -331,19 +428,104 @@ SettingsRows ComputeRows(Rect scrollRegion, float scrollOffset, const CFontManag
 	const float startY = cursor.Y;
 
 	const float rowHeight = RowHeightFor(fonts);
+	const float sectionHeight = SectionHeaderHeightFor(fonts);
+
+	rows.SectionAppearance = RectSplitTop(cursor, sectionHeight - kSectionHeaderTopGap * 0.5f);
 	rows.Font = RectSplitTop(cursor, rowHeight);
 	rows.FontSize = RectSplitTop(cursor, rowHeight);
 	rows.SecondaryFontSize = RectSplitTop(cursor, rowHeight);
-	rows.Animations = RectSplitTop(cursor, rowHeight);
+	rows.Accent = RectSplitTop(cursor, rowHeight);
 	rows.RoundedCorners = RectSplitTop(cursor, rowHeight);
+
+	rows.SectionMotion = RectSplitTop(cursor, sectionHeight);
+	rows.Animations = RectSplitTop(cursor, rowHeight);
+	rows.AnimationSpeed = RectSplitTop(cursor, rowHeight);
+
+	rows.SectionPrivacy = RectSplitTop(cursor, sectionHeight);
 	rows.ExcludeFromCapture = RectSplitTop(cursor, rowHeight);
 	rows.CloseToTray = RectSplitTop(cursor, rowHeight);
-	rows.AnimationSpeed = RectSplitTop(cursor, rowHeight);
-	rows.Accent = RectSplitTop(cursor, rowHeight);
+
+	rows.SectionSecurity = RectSplitTop(cursor, sectionHeight);
 	rows.MasterPassword = RectSplitTop(cursor, rowHeight);
 
 	rows.ContentHeight = cursor.Y - startY;
 	return rows;
+}
+
+// The row a reset target lives on. Every switch over ESettingsResetTarget in this file is
+// deliberately exhaustive with no default label, so adding a target is a compile error
+// here (and in ResetTargetControlRect, and in the panel's own IsTargetAtDefault/
+// ResetTargetToDefault) rather than a button that silently does nothing.
+Rect ResetTargetRowRect(const SettingsRows &rows, ESettingsResetTarget target)
+{
+	switch (target) {
+		case ESettingsResetTarget::SETTINGS_RESET_FONT:
+			return rows.Font;
+		case ESettingsResetTarget::SETTINGS_RESET_FONT_SIZE:
+			return rows.FontSize;
+		case ESettingsResetTarget::SETTINGS_RESET_SECONDARY_FONT_SIZE:
+			return rows.SecondaryFontSize;
+		case ESettingsResetTarget::SETTINGS_RESET_ACCENT:
+			return rows.Accent;
+		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
+			return rows.RoundedCorners;
+		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
+			return rows.Animations;
+		case ESettingsResetTarget::SETTINGS_RESET_ANIMATION_SPEED:
+			return rows.AnimationSpeed;
+		case ESettingsResetTarget::SETTINGS_RESET_EXCLUDE_FROM_CAPTURE:
+			return rows.ExcludeFromCapture;
+		case ESettingsResetTarget::SETTINGS_RESET_CLOSE_TO_TRAY:
+			return rows.CloseToTray;
+		case ESettingsResetTarget::SETTINGS_RESET_COUNT:
+			break;
+	}
+	return Rect{};
+}
+
+// The control a reset target's button sits next to - see ResetButtonRect.
+Rect ResetTargetControlRect(const SettingsRows &rows, ESettingsResetTarget target, const CFontManager &fonts)
+{
+	switch (target) {
+		case ESettingsResetTarget::SETTINGS_RESET_FONT:
+			return FontFieldRect(rows.Font, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_FONT_SIZE:
+			return StepperRect(rows.FontSize, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_SECONDARY_FONT_SIZE:
+			return StepperRect(rows.SecondaryFontSize, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_ACCENT:
+			return SwatchRect(rows.Accent, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
+			return ToggleRect(rows.RoundedCorners, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
+			return ToggleRect(rows.Animations, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_ANIMATION_SPEED:
+			return SliderControlRect(rows.AnimationSpeed, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_EXCLUDE_FROM_CAPTURE:
+			return ToggleRect(rows.ExcludeFromCapture, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_CLOSE_TO_TRAY:
+			return ToggleRect(rows.CloseToTray, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_COUNT:
+			break;
+	}
+	return Rect{};
+}
+
+// Where a row's label column has to stop. Always leaves room for the reset button whether
+// or not one is currently showing: the button comes and goes as the value moves on and off
+// its default, and a label that re-flowed every time it did would be far more distracting
+// than the few pixels of column this costs.
+float LabelRightEdge(Rect control, Rect row, const CFontManager &fonts)
+{
+	constexpr float kLabelControlGap = 16.0f;
+	return ResetButtonRect(control, row, fonts).X - kLabelControlGap;
+}
+
+// Both of the above at once, since every caller (hover, cursor, click, draw) wants the
+// button's own rect and nothing else.
+Rect ResetTargetButtonRect(const SettingsRows &rows, ESettingsResetTarget target, const CFontManager &fonts)
+{
+	return ResetButtonRect(ResetTargetControlRect(rows, target, fonts), ResetTargetRowRect(rows, target), fonts);
 }
 
 // The header's close button glyph - an X built from two crossed lines, since this
@@ -360,18 +542,93 @@ void DrawXGlyph(CDrawList &drawList, Rect rect, Color color)
 // The title + dim description line every row starts with - title in body, description
 // in secondary, stacked per RowLabelBlockHeightFor's own metrics so the two can't
 // drift.
+//
+// labelRightEdge is where the label column actually ends: the left edge of whatever this
+// row's own control (or its reset button, when one is showing) occupies, minus a gap.
+// Both lines are ellipsized to it rather than being drawn at full length, because at a
+// large Font Size / Secondary Font Size they genuinely do reach the control - and text
+// painted straight through a stepper or a toggle is the worst of the available outcomes.
+// The caller passes this rather than DrawRowLabel deriving it, since only the caller knows
+// which control this row has.
 void DrawRowLabel(CDrawList &drawList, const CFontManager &fonts, Rect row, const char *pTitle,
-				  const char *pDescription, std::uint8_t alpha)
+				  const char *pDescription, float labelRightEdge, std::uint8_t alpha)
 {
 	const CFont &body = fonts.GetBody();
 	const CFont &secondary = fonts.GetSecondary();
 	const float titleBaselineY = row.Y + kRowLabelTopGap + body.GetAscent();
 	const float descriptionBaselineY =
 		row.Y + kRowLabelTopGap + body.GetLineHeight() + kRowLabelLineGap + secondary.GetAscent();
-	DrawText(drawList, body, row.X + kRowPaddingX, titleBaselineY, StringViewFromCString(pTitle),
-			 ColorFadeAlpha(kColorText, alpha));
-	DrawText(drawList, secondary, row.X + kRowPaddingX, descriptionBaselineY, StringViewFromCString(pDescription),
-			 ColorFadeAlpha(kColorTextDim, alpha));
+	const float labelX = row.X + kRowPaddingX;
+	const float maxWidth = labelRightEdge - labelX;
+	DrawTextEllipsized(drawList, body, labelX, titleBaselineY, StringViewFromCString(pTitle), maxWidth,
+					   ColorFadeAlpha(kColorText, alpha));
+	DrawTextEllipsized(drawList, secondary, labelX, descriptionBaselineY, StringViewFromCString(pDescription), maxWidth,
+					   ColorFadeAlpha(kColorTextDim, alpha));
+}
+
+// A section heading - the group's name and a hairline running out to the row padding on
+// the right, and nothing else: an accent bar on the left made the headings compete with
+// the rows they were only supposed to be labelling. Bottom-aligned within its strip rather
+// than top-aligned, so the first heading (whose strip is deliberately shorter - see
+// ComputeRows) still sits the same distance above its own first row as every other one.
+//
+// The rule lands on the text's real visual center: baseline minus half of (ascent +
+// descent), since descent is negative (see font.h). The obvious-looking (descent - ascent)
+// form is a different quantity entirely - half the glyph height rather than the offset to
+// its middle - and it sat the rule visibly high of the text it runs beside.
+void DrawSectionHeader(CDrawList &drawList, const CFontManager &fonts, Rect rect, const char *pTitle,
+					   std::uint8_t alpha)
+{
+	const CFont &secondary = fonts.GetSecondary();
+	const CStringView title = StringViewFromCString(pTitle);
+	const float baselineY =
+		rect.Y + rect.H - kSectionHeaderBottomGap - (secondary.GetLineHeight() - secondary.GetAscent());
+	const float centerY = baselineY - (secondary.GetAscent() + secondary.GetDescent()) * 0.5f;
+
+	// A short lead-in rule, the label, then the long rule out to the padding - "--- Motion
+	// --------". The stub on the left is what makes the heading read as part of the rule
+	// rather than as a line that happens to start after some text, and it gives every
+	// heading the same left edge as the rows beneath it.
+	constexpr float kTextRuleGap = 10.0f;
+	constexpr float kLeadRuleWidth = 16.0f;
+	const float leadX = rect.X + kRowPaddingX;
+	drawList.AddRectFilled(leadX, centerY, kLeadRuleWidth, 1.0f, ColorFadeAlpha(kColorSeparator, alpha));
+
+	const float textX = leadX + kLeadRuleWidth + kTextRuleGap;
+	DrawText(drawList, secondary, textX, baselineY, title, ColorFadeAlpha(kColorText, alpha));
+
+	const float ruleX = textX + TextWidth(secondary, title) + kTextRuleGap;
+	const float ruleRight = rect.X + rect.W - kRowPaddingX;
+	if (ruleRight > ruleX) {
+		drawList.AddRectFilled(ruleX, centerY, ruleRight - ruleX, 1.0f, ColorFadeAlpha(kColorSeparator, alpha));
+	}
+}
+
+// A row's reset button - present only while its row is actually off its default, so the
+// button appearing *is* the signal that there's something to restore. appearAmount fades
+// it in; spinAmount is 1.0 the instant it's clicked and eases back to 0, drawn here as a
+// full turn, so the icon winds back while the value it restored animates back and the two
+// read as one event.
+void DrawResetButton(CDrawList &drawList, const CTexture *pIcon, Rect rect, float appearAmount, float spinAmount,
+					 bool hovered, std::uint8_t alpha)
+{
+	if (appearAmount <= 0.01f || pIcon == nullptr) {
+		return;
+	}
+
+	const auto fade = static_cast<std::uint8_t>(static_cast<float>(alpha) * appearAmount);
+	if (hovered) {
+		drawList.AddRectRoundedFilled(rect.X, rect.Y, rect.W, rect.H, CDrawList::UniformRadii(7.0f),
+									  ColorFadeAlpha(kColorResetHoverBg, fade));
+	}
+
+	// Counter-clockwise: this restores a previous value, and a spin that reads as winding
+	// back is the whole point of animating it at all.
+	const float radians = -spinAmount * kTwoPi;
+	const float iconSize = kResetIconSize;
+	drawList.AddRectTexturedRotated(rect.X + (rect.W - iconSize) * 0.5f, rect.Y + (rect.H - iconSize) * 0.5f, iconSize,
+									iconSize, radians, pIcon,
+									ColorFadeAlpha(hovered ? kColorText : kColorResetIdle, fade));
 }
 
 // A pill track + sliding dot, onAmount already eased 0..1 by the caller (see
@@ -450,13 +707,17 @@ void DrawStepper(CDrawList &drawList, const CFont &font, Rect rect, float value,
 	drawList.AddLine(pcx - 6.0f, pcy, pcx + 6.0f, pcy, 2.0f, ColorFadeAlpha(kColorText, alpha));
 	drawList.AddLine(pcx, pcy - 6.0f, pcx, pcy + 6.0f, 2.0f, ColorFadeAlpha(kColorText, alpha));
 
+	// Rounded, not truncated: `value` is an eased display copy (see CSettingsPanel's own
+	// m_flFontSizeDisplay), so it spends most of a reset animation between two integers,
+	// and truncating would make the readout lag the control by a whole step.
 	char buffer[8];
-	const int written = std::snprintf(buffer, sizeof(buffer), "%d", static_cast<int>(value));
+	const int written = std::snprintf(buffer, sizeof(buffer), "%d", static_cast<int>(std::lround(value)));
 	const CStringView text{buffer, written > 0 ? static_cast<std::uint64_t>(written) : 0};
 	const float textW = TextWidth(font, text);
 	const float middleX = minus.X + minus.W;
 	const float middleW = plus.X - middleX;
-	DrawText(drawList, font, middleX + (middleW - textW) * 0.5f, rect.Y + (rect.H + font.GetAscent()) * 0.5f, text,
+	DrawText(drawList, font, middleX + (middleW - textW) * 0.5f,
+			 rect.Y + rect.H * 0.5f + (font.GetAscent() + font.GetDescent()) * 0.5f, text,
 			 ColorFadeAlpha(kColorText, alpha));
 }
 
@@ -471,13 +732,129 @@ void SyncAppliedFontName(CSettings &settings, CStringView value)
 }
 } // namespace
 
-CSettingsPanel::CSettingsPanel(CFontManager &fonts, CSettings &settings, CWindow &window, IRenderer &renderer)
+CSettingsPanel::CSettingsPanel(CFontManager &fonts, CSettings &settings, CWindow &window, IRenderer &renderer,
+							   CAssetManager &assets)
 	: m_fonts(fonts)
 	, m_settings(settings)
 	, m_window(window)
 	, m_renderer(renderer)
+	, m_assets(assets)
 {
 	m_fontNameInput.Init(StringViewFromCString(m_settings.m_szFontName));
+
+	// Seeded from the real values, not left at zero: these only exist to make a *change*
+	// animate, so the panel's very first frame must already be showing the truth rather
+	// than easing up to it from nothing.
+	m_flFontSizeDisplay = m_settings.m_flFontPixelSize;
+	m_flSecondaryFontSizeDisplay = m_settings.m_flSecondaryFontPixelSize;
+	m_flAnimationSpeedDisplay = m_settings.m_flAnimationSpeed;
+	m_flAccentDisplayR = static_cast<float>(m_settings.m_clrAccent.R);
+	m_flAccentDisplayG = static_cast<float>(m_settings.m_clrAccent.G);
+	m_flAccentDisplayB = static_cast<float>(m_settings.m_clrAccent.B);
+}
+
+bool CSettingsPanel::IsTargetAtDefault(ESettingsResetTarget target) const
+{
+	// The shipped defaults, straight off a default-constructed record rather than a second
+	// hand-maintained table here - CSettings' own member initializers are the one place
+	// this project states what a setting starts as, and a copy of them here would drift
+	// the first time one changed.
+	const CSettings defaults;
+	constexpr float kEpsilon = 0.001f;
+
+	switch (target) {
+		case ESettingsResetTarget::SETTINGS_RESET_FONT:
+			// Both the applied name and whatever is currently typed into the field: an
+			// un-applied edit sitting in the box is exactly the kind of thing a reset is
+			// for, so the button stays live until the box itself reads the default too.
+			return std::strcmp(m_settings.m_szFontName, defaults.m_szFontName) == 0 &&
+				   m_fontNameInput.GetValue().Length == std::strlen(defaults.m_szFontName) &&
+				   std::memcmp(m_fontNameInput.GetValue().pData, defaults.m_szFontName,
+							   m_fontNameInput.GetValue().Length) == 0;
+		case ESettingsResetTarget::SETTINGS_RESET_FONT_SIZE:
+			return std::fabs(m_settings.m_flFontPixelSize - defaults.m_flFontPixelSize) < kEpsilon;
+		case ESettingsResetTarget::SETTINGS_RESET_SECONDARY_FONT_SIZE:
+			return std::fabs(m_settings.m_flSecondaryFontPixelSize - defaults.m_flSecondaryFontPixelSize) < kEpsilon;
+		case ESettingsResetTarget::SETTINGS_RESET_ACCENT:
+			return m_settings.m_clrAccent.R == defaults.m_clrAccent.R &&
+				   m_settings.m_clrAccent.G == defaults.m_clrAccent.G &&
+				   m_settings.m_clrAccent.B == defaults.m_clrAccent.B &&
+				   m_settings.m_clrAccent.A == defaults.m_clrAccent.A;
+		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
+			return m_settings.m_bRoundedCornersEnabled == defaults.m_bRoundedCornersEnabled;
+		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
+			return m_settings.m_bAnimationsEnabled == defaults.m_bAnimationsEnabled;
+		case ESettingsResetTarget::SETTINGS_RESET_ANIMATION_SPEED:
+			return std::fabs(m_settings.m_flAnimationSpeed - defaults.m_flAnimationSpeed) < kEpsilon;
+		case ESettingsResetTarget::SETTINGS_RESET_EXCLUDE_FROM_CAPTURE:
+			return m_settings.m_bExcludeAccountListFromCapture == defaults.m_bExcludeAccountListFromCapture;
+		case ESettingsResetTarget::SETTINGS_RESET_CLOSE_TO_TRAY:
+			return m_settings.m_bCloseToTray == defaults.m_bCloseToTray;
+		case ESettingsResetTarget::SETTINGS_RESET_COUNT:
+			break;
+	}
+	return true;
+}
+
+void CSettingsPanel::ResetTargetToDefault(ESettingsResetTarget target)
+{
+	const CSettings defaults;
+
+	switch (target) {
+		case ESettingsResetTarget::SETTINGS_RESET_FONT:
+			m_fontNameInput.SetValue(StringViewFromCString(defaults.m_szFontName));
+			// Only mirrored into settings if the bake actually succeeds, same rule every
+			// other font edit here follows (see SyncAppliedFontName) - the default face is
+			// as capable of being missing on a given machine as a typed one.
+			if (m_fonts.ApplyBody(m_renderer, m_fontNameInput.GetValue(), m_settings.m_flFontPixelSize,
+								  m_settings.m_flSecondaryFontPixelSize, m_window.GetDpiScale())) {
+				SyncAppliedFontName(m_settings, m_fontNameInput.GetValue());
+			}
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_FONT_SIZE:
+			m_settings.m_flFontPixelSize = defaults.m_flFontPixelSize;
+			if (m_fonts.ApplyBody(m_renderer, m_fontNameInput.GetValue(), m_settings.m_flFontPixelSize,
+								  m_settings.m_flSecondaryFontPixelSize, m_window.GetDpiScale())) {
+				SyncAppliedFontName(m_settings, m_fontNameInput.GetValue());
+			}
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_SECONDARY_FONT_SIZE:
+			m_settings.m_flSecondaryFontPixelSize = defaults.m_flSecondaryFontPixelSize;
+			if (m_fonts.ApplyBody(m_renderer, m_fontNameInput.GetValue(), m_settings.m_flFontPixelSize,
+								  m_settings.m_flSecondaryFontPixelSize, m_window.GetDpiScale())) {
+				SyncAppliedFontName(m_settings, m_fontNameInput.GetValue());
+			}
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_ACCENT:
+			m_settings.m_clrAccent = defaults.m_clrAccent;
+			// The picker popup, if it happens to be open, is showing the color that just
+			// stopped being current - closing it is the honest outcome, and reopening it
+			// picks up the restored value the way it always does.
+			m_colorPicker.Close();
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
+			m_settings.m_bRoundedCornersEnabled = defaults.m_bRoundedCornersEnabled;
+			CDrawList::SetRoundedCornersEnabled(m_settings.m_bRoundedCornersEnabled);
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
+			m_settings.m_bAnimationsEnabled = defaults.m_bAnimationsEnabled;
+			CAnimator::SetEnabled(m_settings.m_bAnimationsEnabled);
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_ANIMATION_SPEED:
+			m_settings.m_flAnimationSpeed = defaults.m_flAnimationSpeed;
+			CAnimator::SetSpeed(m_settings.m_flAnimationSpeed);
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_EXCLUDE_FROM_CAPTURE:
+			m_settings.m_bExcludeAccountListFromCapture = defaults.m_bExcludeAccountListFromCapture;
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_CLOSE_TO_TRAY:
+			m_settings.m_bCloseToTray = defaults.m_bCloseToTray;
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_COUNT:
+			return;
+	}
+
+	m_aResetSpinAmount[static_cast<std::uint64_t>(target)] = 1.0f;
 }
 
 void CSettingsPanel::Open()
@@ -490,6 +867,9 @@ void CSettingsPanel::Close()
 	m_bOpen = false;
 	m_fontNameInput.m_bFocused = false;
 	m_colorPicker.Close();
+	// Nothing left on screen for a bubble to point at - without this it would hang over
+	// whatever is behind the panel for the length of its own fade.
+	m_tooltip.Reset();
 }
 
 void CSettingsPanel::Update(float deltaSeconds)
@@ -506,15 +886,80 @@ void CSettingsPanel::Update(float deltaSeconds)
 	m_flRoundedCornersToggleAmount =
 		CAnimator::EaseToward(m_flRoundedCornersToggleAmount, m_settings.m_bRoundedCornersEnabled ? 1.0f : 0.0f,
 							  kToggleEaseRate, deltaSeconds);
-	m_flCloseToTrayToggleAmount =
-		CAnimator::EaseToward(m_flCloseToTrayToggleAmount, m_settings.m_bCloseToTray ? 1.0f : 0.0f,
-							  kToggleEaseRate, deltaSeconds);
+	m_flCloseToTrayToggleAmount = CAnimator::EaseToward(
+		m_flCloseToTrayToggleAmount, m_settings.m_bCloseToTray ? 1.0f : 0.0f, kToggleEaseRate, deltaSeconds);
 	m_flExcludeFromCaptureToggleAmount =
 		CAnimator::EaseToward(m_flExcludeFromCaptureToggleAmount,
 							  m_settings.m_bExcludeAccountListFromCapture ? 1.0f : 0.0f, kToggleEaseRate, deltaSeconds);
 
+	// Eased display copies of everything whose control would otherwise snap - see the
+	// members' own comment in settings_panel.h. The Animation Speed slider is the one
+	// exception while it's actually being dragged: easing there would make the thumb trail
+	// the cursor, which reads as lag, not as animation.
+	m_flFontSizeDisplay =
+		CAnimator::EaseToward(m_flFontSizeDisplay, m_settings.m_flFontPixelSize, kValueEaseRate, deltaSeconds);
+	m_flSecondaryFontSizeDisplay = CAnimator::EaseToward(
+		m_flSecondaryFontSizeDisplay, m_settings.m_flSecondaryFontPixelSize, kValueEaseRate, deltaSeconds);
+	if (m_animationSpeedDrag.IsPressed()) {
+		m_flAnimationSpeedDisplay = m_settings.m_flAnimationSpeed;
+	} else {
+		m_flAnimationSpeedDisplay = CAnimator::EaseToward(m_flAnimationSpeedDisplay, m_settings.m_flAnimationSpeed,
+														  kValueEaseRate, deltaSeconds);
+	}
+	m_flAccentDisplayR = CAnimator::EaseToward(m_flAccentDisplayR, static_cast<float>(m_settings.m_clrAccent.R),
+											   kValueEaseRate, deltaSeconds);
+	m_flAccentDisplayG = CAnimator::EaseToward(m_flAccentDisplayG, static_cast<float>(m_settings.m_clrAccent.G),
+											   kValueEaseRate, deltaSeconds);
+	m_flAccentDisplayB = CAnimator::EaseToward(m_flAccentDisplayB, static_cast<float>(m_settings.m_clrAccent.B),
+											   kValueEaseRate, deltaSeconds);
+
+	UpdateResetButtons(deltaSeconds);
+
 	m_fontNameInput.Update(deltaSeconds);
 	m_rowsScroll.Update(deltaSeconds);
+	m_tooltip.Update(deltaSeconds);
+}
+
+// Hover-driven state for the per-row reset buttons, plus the tooltip request for whichever
+// one the cursor is resting on. Lives in Update rather than Draw so the fade starts on the
+// same frame the hover does and Draw stays a pure paint - see ui/tooltip.h's own note on
+// why Request belongs here.
+void CSettingsPanel::UpdateResetButtons(float deltaSeconds)
+{
+	const SettingsPanelLayout layout = ComputeLayout(m_flOpenAmount, static_cast<float>(m_window.GetWidth()),
+													 static_cast<float>(m_window.GetHeight()), m_fonts);
+	const SettingsRows rows = ComputeRows(layout.ScrollRegion, m_rowsScroll.m_flScrollOffset, m_fonts);
+
+	// A closed panel has no hover to speak of, and the color picker's popup covers rows it
+	// would otherwise look like the cursor is over.
+	const bool pointerLive =
+		IsBlocking() && !m_colorPicker.IsBlocking() && RectContainsPoint(layout.ScrollRegion, m_flMouseX, m_flMouseY);
+
+	for (std::uint64_t i = 0; i < static_cast<std::uint64_t>(ESettingsResetTarget::SETTINGS_RESET_COUNT); i += 1) {
+		const auto target = static_cast<ESettingsResetTarget>(i);
+		const Rect row = ResetTargetRowRect(rows, target);
+		const bool inView = RowInView(row, layout.ScrollRegion);
+		const bool atDefault = IsTargetAtDefault(target);
+
+		// Shown only while it would actually do something. A button that appears on hover
+		// even when the row is already at its default is a control that does nothing when
+		// clicked, and no amount of dimming makes that read as anything but broken - so the
+		// button's presence is the signal, and its absence means "this is the default."
+		const float appearTarget = (IsBlocking() && !atDefault) ? 1.0f : 0.0f;
+		m_aResetAppearAmount[i] =
+			CAnimator::EaseToward(m_aResetAppearAmount[i], appearTarget, kResetAppearRate, deltaSeconds);
+		m_aResetSpinAmount[i] = CAnimator::EaseToward(m_aResetSpinAmount[i], 0.0f, kResetSpinRate, deltaSeconds);
+		if (m_aResetSpinAmount[i] < 0.002f) {
+			m_aResetSpinAmount[i] = 0.0f;
+		}
+
+		if (pointerLive && inView && !atDefault) {
+			const Rect button = ResetTargetButtonRect(rows, target, m_fonts);
+			if (RectContainsPoint(button, m_flMouseX, m_flMouseY)) {
+				m_tooltip.Request(StringViewFromCString("Restore default setting."), button);
+			}
+		}
+	}
 }
 
 bool CSettingsPanel::OnPointerDown(float x, float y)
@@ -633,6 +1078,18 @@ ECursorKind CSettingsPanel::GetDesiredCursor() const
 
 	const SettingsRows rows = ComputeRows(layout.ScrollRegion, m_rowsScroll.m_flScrollOffset, m_fonts);
 
+	// Same order as HandleClick's own dispatch: a reset button overlaps no other control,
+	// but it does sit inside its row, so it answers first for the same reason.
+	for (std::uint64_t i = 0; i < static_cast<std::uint64_t>(ESettingsResetTarget::SETTINGS_RESET_COUNT); i += 1) {
+		const auto target = static_cast<ESettingsResetTarget>(i);
+		if (!RowInView(ResetTargetRowRect(rows, target), layout.ScrollRegion) || IsTargetAtDefault(target)) {
+			continue;
+		}
+		if (RectContainsPoint(ResetTargetButtonRect(rows, target, m_fonts), m_flMouseX, m_flMouseY)) {
+			return ECursorKind::CURSOR_HAND;
+		}
+	}
+
 	if (RowInView(rows.Font, layout.ScrollRegion) &&
 		RectContainsPoint(FontFieldRect(rows.Font, m_fonts), m_flMouseX, m_flMouseY)) {
 		return ECursorKind::CURSOR_IBEAM;
@@ -702,6 +1159,24 @@ bool CSettingsPanel::HandleClick(float x, float y)
 	// clickInScrollRegion guard CAccountModal's account list uses.
 	const bool clickInScrollRegion = RectContainsPoint(layout.ScrollRegion, x, y);
 	const SettingsRows rows = ComputeRows(layout.ScrollRegion, m_rowsScroll.m_flScrollOffset, m_fonts);
+
+	// Reset buttons are tested before anything else on the row: one sits directly left of
+	// its row's own control, and whichever branch below owns that control would otherwise
+	// have to know to exclude it. A button on a row already at its default is deliberately
+	// inert (it's drawn dimmed - see DrawResetButton), so clicking it does nothing rather
+	// than replaying an animation for a value that never moved.
+	if (clickInScrollRegion && !m_colorPicker.IsBlocking()) {
+		for (std::uint64_t i = 0; i < static_cast<std::uint64_t>(ESettingsResetTarget::SETTINGS_RESET_COUNT); i += 1) {
+			const auto target = static_cast<ESettingsResetTarget>(i);
+			if (!RowInView(ResetTargetRowRect(rows, target), layout.ScrollRegion) || IsTargetAtDefault(target)) {
+				continue;
+			}
+			if (RectContainsPoint(ResetTargetButtonRect(rows, target, m_fonts), x, y)) {
+				ResetTargetToDefault(target);
+				return true;
+			}
+		}
+	}
 
 	const bool clickedFontField = clickInScrollRegion && RowInView(rows.Font, layout.ScrollRegion) &&
 								  RectContainsPoint(FontFieldRect(rows.Font, m_fonts), x, y);
@@ -891,8 +1366,8 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 	const CFont &secondary = m_fonts.GetSecondary();
 
 	DrawText(drawList, body, layout.Header.X + kRowPaddingX,
-			 layout.Header.Y + (layout.Header.H + body.GetAscent()) * 0.5f, StringViewFromCString("Settings"),
-			 ColorFadeAlpha(kColorText, alpha));
+			 layout.Header.Y + layout.Header.H * 0.5f + (body.GetAscent() + body.GetDescent()) * 0.5f,
+			 StringViewFromCString("Settings"), ColorFadeAlpha(kColorText, alpha));
 
 	const Rect close = CloseRect(layout.Panel, m_fonts);
 	const bool hoverClose = RectContainsPoint(close, m_flMouseX, m_flMouseY);
@@ -907,8 +1382,34 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 	// can't paint outside ScrollRegion - same pattern CAccountModal's account list uses.
 	drawList.PushClipRect(layout.ScrollRegion);
 
+	// The hovered row's band, painted before any row content so every label and control
+	// lands on top of it. Deliberately not eased: a highlight that fades behind a moving
+	// cursor trails the thing it's supposed to be marking.
+	const Rect hoverableRows[]{rows.Font,			rows.FontSize,		rows.SecondaryFontSize, rows.Accent,
+							   rows.RoundedCorners, rows.Animations,	rows.AnimationSpeed,	rows.ExcludeFromCapture,
+							   rows.CloseToTray,	rows.MasterPassword};
+	if (IsBlocking() && !m_colorPicker.IsBlocking() && RectContainsPoint(layout.ScrollRegion, m_flMouseX, m_flMouseY)) {
+		for (const Rect &row : hoverableRows) {
+			if (RowInView(row, layout.ScrollRegion) && RectContainsPoint(row, m_flMouseX, m_flMouseY)) {
+				drawList.AddRectRoundedFilled(row.X + kRowHighlightInsetX, row.Y, row.W - kRowHighlightInsetX * 2.0f,
+											  row.H, CDrawList::UniformRadii(kRowHighlightRadius),
+											  ColorFadeAlpha(kColorRowHover, alpha));
+				break;
+			}
+		}
+	}
+
+	const Rect sectionRows[]{rows.SectionAppearance, rows.SectionMotion, rows.SectionPrivacy, rows.SectionSecurity};
+	const char *const sectionTitles[]{"Appearance", "Motion", "Privacy", "Security"};
+	for (std::uint64_t i = 0; i < sizeof(sectionRows) / sizeof(sectionRows[0]); i += 1) {
+		if (RowInView(sectionRows[i], layout.ScrollRegion)) {
+			DrawSectionHeader(drawList, m_fonts, sectionRows[i], sectionTitles[i], alpha);
+		}
+	}
+
 	if (RowInView(rows.Font, layout.ScrollRegion)) {
-		DrawRowLabel(drawList, m_fonts, rows.Font, "Font", "The system font file applied to the UI.", alpha);
+		DrawRowLabel(drawList, m_fonts, rows.Font, "Font", "The system font file applied to the UI.",
+					 LabelRightEdge(FontFieldRect(rows.Font, m_fonts), rows.Font, m_fonts), alpha);
 		const Rect field = FontFieldRect(rows.Font, m_fonts);
 		// A genuine accent-colored border ring when focused (not just a subtly-tinted
 		// fill, which read as ambiguous about which field was actually active).
@@ -926,71 +1427,107 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 	}
 
 	if (RowInView(rows.FontSize, layout.ScrollRegion)) {
-		DrawRowLabel(drawList, m_fonts, rows.FontSize, "Font Size", "Determines the scale of the whole UI.", alpha);
-		DrawStepper(drawList, body, StepperRect(rows.FontSize, m_fonts), m_settings.m_flFontPixelSize, alpha);
+		DrawRowLabel(drawList, m_fonts, rows.FontSize, "Font Size", "Determines the scale of the whole UI.",
+					 LabelRightEdge(StepperRect(rows.FontSize, m_fonts), rows.FontSize, m_fonts), alpha);
+		DrawStepper(drawList, body, StepperRect(rows.FontSize, m_fonts), m_flFontSizeDisplay, alpha);
 	}
 
 	if (RowInView(rows.SecondaryFontSize, layout.ScrollRegion)) {
 		DrawRowLabel(drawList, m_fonts, rows.SecondaryFontSize, "Secondary Font Size",
-					 "Scale of labels/hints and other small text.", alpha);
-		DrawStepper(drawList, body, StepperRect(rows.SecondaryFontSize, m_fonts), m_settings.m_flSecondaryFontPixelSize,
-					alpha);
+					 "Scale of labels/hints and other small text.",
+					 LabelRightEdge(StepperRect(rows.SecondaryFontSize, m_fonts), rows.SecondaryFontSize, m_fonts),
+					 alpha);
+		DrawStepper(drawList, body, StepperRect(rows.SecondaryFontSize, m_fonts), m_flSecondaryFontSizeDisplay, alpha);
 	}
 
 	if (RowInView(rows.Animations, layout.ScrollRegion)) {
 		DrawRowLabel(drawList, m_fonts, rows.Animations, "Animations",
-					 "Applies animations to popups, scrolling, and the caret.", alpha);
+					 "Applies animations to popups, scrolling, and the caret.",
+					 LabelRightEdge(ToggleRect(rows.Animations, m_fonts), rows.Animations, m_fonts), alpha);
 		DrawToggle(drawList, ToggleRect(rows.Animations, m_fonts), m_flAnimationsToggleAmount, m_settings.m_clrAccent,
 				   alpha);
 	}
 
 	if (RowInView(rows.RoundedCorners, layout.ScrollRegion)) {
 		DrawRowLabel(drawList, m_fonts, rows.RoundedCorners, "Round Corners",
-					 "Applies rounding to popups, banners, and buttons.", alpha);
+					 "Applies rounding to popups, banners, and buttons.",
+					 LabelRightEdge(ToggleRect(rows.RoundedCorners, m_fonts), rows.RoundedCorners, m_fonts), alpha);
 		DrawToggle(drawList, ToggleRect(rows.RoundedCorners, m_fonts), m_flRoundedCornersToggleAmount,
 				   m_settings.m_clrAccent, alpha);
 	}
 
 	if (RowInView(rows.ExcludeFromCapture, layout.ScrollRegion)) {
 		DrawRowLabel(drawList, m_fonts, rows.ExcludeFromCapture, "Hide From Screen Capture",
-					 "Excludes the account list from screenshots and screen sharing.", alpha);
+					 "Excludes the account list from screenshots and screen sharing.",
+					 LabelRightEdge(ToggleRect(rows.ExcludeFromCapture, m_fonts), rows.ExcludeFromCapture, m_fonts),
+					 alpha);
 		DrawToggle(drawList, ToggleRect(rows.ExcludeFromCapture, m_fonts), m_flExcludeFromCaptureToggleAmount,
 				   m_settings.m_clrAccent, alpha);
 	}
 
 	if (RowInView(rows.CloseToTray, layout.ScrollRegion)) {
 		DrawRowLabel(drawList, m_fonts, rows.CloseToTray, "Close To Tray",
-					 "Closing hides Rift to the system tray instead of quitting.", alpha);
-		DrawToggle(drawList, ToggleRect(rows.CloseToTray, m_fonts), m_flCloseToTrayToggleAmount,
-				   m_settings.m_clrAccent, alpha);
+					 "Closing hides Rift to the system tray instead of quitting.",
+					 LabelRightEdge(ToggleRect(rows.CloseToTray, m_fonts), rows.CloseToTray, m_fonts), alpha);
+		DrawToggle(drawList, ToggleRect(rows.CloseToTray, m_fonts), m_flCloseToTrayToggleAmount, m_settings.m_clrAccent,
+				   alpha);
 	}
 
 	if (RowInView(rows.AnimationSpeed, layout.ScrollRegion)) {
 		DrawRowLabel(drawList, m_fonts, rows.AnimationSpeed, "Animation Speed",
-					 "How fast popups, scrolling, and toggles animate.", alpha);
-		DrawSlider(drawList, body, SliderTrackRect(rows.AnimationSpeed, m_fonts), m_settings.m_flAnimationSpeed,
+					 "How fast popups, scrolling, and toggles animate.",
+					 LabelRightEdge(SliderControlRect(rows.AnimationSpeed, m_fonts), rows.AnimationSpeed, m_fonts),
+					 alpha);
+		DrawSlider(drawList, body, SliderTrackRect(rows.AnimationSpeed, m_fonts), m_flAnimationSpeedDisplay,
 				   m_settings.m_clrAccent, alpha);
 	}
 
 	if (RowInView(rows.Accent, layout.ScrollRegion)) {
 		DrawRowLabel(drawList, m_fonts, rows.Accent, "Accent Color", "Click to pick the selection/button accent color.",
-					 alpha);
+					 LabelRightEdge(SwatchRect(rows.Accent, m_fonts), rows.Accent, m_fonts), alpha);
 		const Rect swatch = SwatchRect(rows.Accent, m_fonts);
+		// The eased display copy, so restoring the default accent travels there instead of
+		// cutting - every other surface in the app reads m_clrAccent directly and changes
+		// instantly, which is the correct behavior for them and the wrong one here.
+		const Color swatchColor{
+			static_cast<std::uint8_t>(std::lround(m_flAccentDisplayR)),
+			static_cast<std::uint8_t>(std::lround(m_flAccentDisplayG)),
+			static_cast<std::uint8_t>(std::lround(m_flAccentDisplayB)),
+			m_settings.m_clrAccent.A,
+		};
 		drawList.AddRectRoundedFilled(swatch.X, swatch.Y, swatch.W, swatch.H, CDrawList::UniformRadii(6.0f),
-									  ColorFadeAlpha(m_settings.m_clrAccent, alpha));
+									  ColorFadeAlpha(swatchColor, alpha));
 	}
 
 	if (RowInView(rows.MasterPassword, layout.ScrollRegion)) {
-		DrawRowLabel(drawList, m_fonts, rows.MasterPassword, "Master Password",
-					 "Encrypts your saved account passwords.", alpha);
+		DrawRowLabel(
+			drawList, m_fonts, rows.MasterPassword, "Master Password", "Encrypts your saved account passwords.",
+			LabelRightEdge(MasterPasswordResetButtonRect(rows.MasterPassword, m_fonts), rows.MasterPassword, m_fonts),
+			alpha);
 
 		const Rect button = MasterPasswordResetButtonRect(rows.MasterPassword, m_fonts);
 		const bool hoverButton = RectContainsPoint(button, m_flMouseX, m_flMouseY);
-		drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(6.0f),
-									  ColorFadeAlpha(hoverButton ? ColorLighten(kColorControlBg, 10) : kColorControlBg,
-													alpha));
+		drawList.AddRectRoundedFilled(
+			button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(6.0f),
+			ColorFadeAlpha(hoverButton ? ColorLighten(kColorControlBg, 10) : kColorControlBg, alpha));
 		DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H,
 						 StringViewFromCString("Reset Password"), ColorFadeAlpha(kColorText, alpha));
+	}
+
+	// After every row's own content, still inside the clip: a button belongs to its row and
+	// should scroll out of view with it.
+	for (std::uint64_t i = 0; i < static_cast<std::uint64_t>(ESettingsResetTarget::SETTINGS_RESET_COUNT); i += 1) {
+		const auto target = static_cast<ESettingsResetTarget>(i);
+		const Rect row = ResetTargetRowRect(rows, target);
+		if (!RowInView(row, layout.ScrollRegion)) {
+			continue;
+		}
+		const Rect button = ResetTargetButtonRect(rows, target, m_fonts);
+		const bool hovered = !m_colorPicker.IsBlocking() &&
+							 RectContainsPoint(layout.ScrollRegion, m_flMouseX, m_flMouseY) &&
+							 RectContainsPoint(button, m_flMouseX, m_flMouseY);
+		DrawResetButton(drawList, m_assets.GetIconReset(), button, m_aResetAppearAmount[i], m_aResetSpinAmount[i],
+						hovered, alpha);
 	}
 
 	drawList.PopClipRect();
@@ -1003,7 +1540,7 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 	drawList.AddRectFilled(layout.Footer.X + kRowPaddingX, layout.Footer.Y, layout.Footer.W - kRowPaddingX * 2.0f, 1.0f,
 						   ColorFadeAlpha(kColorSeparator, alpha));
 	DrawText(drawList, secondary, layout.Footer.X + kRowPaddingX,
-			 layout.Footer.Y + (layout.Footer.H + secondary.GetAscent()) * 0.5f,
+			 layout.Footer.Y + layout.Footer.H * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f,
 			 StringViewFromCString("Escape to dismiss"), ColorFadeAlpha(kColorTextDim, alpha));
 
 	// Drawn last so it layers over every row above, including the footer - needs the
@@ -1013,4 +1550,9 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 	if (RowInView(rows.Accent, layout.ScrollRegion)) {
 		m_colorPicker.Draw(drawList);
 	}
+
+	// Absolutely last, over even the color picker - a tooltip that can be painted over by
+	// the thing it's explaining isn't a tooltip. Clamped to the panel rather than the
+	// window so a bubble never floats off the dialog it belongs to.
+	m_tooltip.Draw(drawList, m_fonts, layout.Panel, alpha);
 }

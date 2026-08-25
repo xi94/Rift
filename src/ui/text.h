@@ -24,3 +24,14 @@ void DrawText(CDrawList &list, const CFont &font, float x, float y, CStringView 
 // in the first place before being de-duplicated into this same shared-helper shape.
 void DrawCenteredText(CDrawList &list, const CFont &font, float x, float y, float w, float h, CStringView text,
 					  Color color);
+
+// DrawText, but never wider than maxWidth: text that doesn't fit is cut and given a
+// trailing ellipsis. Exists because this project's panels are laid out in real glyph
+// metrics - a label that fits comfortably at the default Font Size can genuinely run into
+// (or straight through) the control on the right of its own row once the user raises it,
+// and silently painting over a control is worse than an honest "...". CDrawList's clip
+// rect isn't an option for this: it's a single active rect rather than a stack (see
+// PushClipRect), so a per-label clip inside an already-clipped scroll region would
+// clobber the region's own.
+void DrawTextEllipsized(CDrawList &list, const CFont &font, float x, float y, CStringView text, float maxWidth,
+						Color color);

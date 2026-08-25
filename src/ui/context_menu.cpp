@@ -115,7 +115,7 @@ void CContextMenu::Draw(CDrawList &drawList)
 			drawList.AddRectRoundedFilled(row.X + 4.0f, row.Y, row.W - 8.0f, row.H, CDrawList::UniformRadii(6.0f),
 										  kColorHover);
 		}
-		DrawText(drawList, body, row.X + 14.0f, row.Y + (row.H + body.GetAscent()) * 0.5f, m_aItems[i].Label,
-				 kColorText);
+		DrawText(drawList, body, row.X + 14.0f, row.Y + row.H * 0.5f + (body.GetAscent() + body.GetDescent()) * 0.5f,
+				 m_aItems[i].Label, kColorText);
 	}
 }

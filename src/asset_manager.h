@@ -105,6 +105,14 @@ class CAssetManager {
 		return m_pIconUpdate.get();
 	}
 
+	// The Settings panel's per-row "restore this setting's default" buttons (see
+	// ui/settings_panel.cpp) - drawn through CDrawList::AddRectTexturedRotated so it can
+	// spin a full turn on click while the value it restored animates back.
+	CTexture *GetIconReset() const
+	{
+		return m_pIconReset.get();
+	}
+
 	// Per-game icons (256x256 source) - handed to CCarousel as each banner's own icon,
 	// which its List view (large) and CGameSelectPopup (small) both draw instead of the
 	// color-square/cover-fit-crop fallbacks they'd otherwise use.
@@ -166,6 +174,7 @@ class CAssetManager {
 	std::unique_ptr<CTexture> m_pIconEyeVisible;
 	std::unique_ptr<CTexture> m_pIconEyeHidden;
 	std::unique_ptr<CTexture> m_pIconUpdate;
+	std::unique_ptr<CTexture> m_pIconReset;
 
 	std::unique_ptr<CTexture> m_pIconLeagueOfLegends;
 	std::unique_ptr<CTexture> m_pIconValorant;

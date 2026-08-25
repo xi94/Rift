@@ -97,6 +97,16 @@ class CAccountModal : public CWidget {
 	// account.
 	void RemoveAccountRow(std::uint32_t queryIndex);
 
+	// Resolves a row's query index (see this class's own file comment) to the real account
+	// behind it and hands back the two fields worth copying, as pointers to CAccount's own
+	// null-terminated buffers (which is what the clipboard call wants anyway). False if it
+	// doesn't resolve to a real account, in which case neither output is touched. Exists so
+	// a coordinating owner can serve the row's right-click menu without duplicating
+	// ResolveVisibleAccount's query-index-to-storage mapping - the one piece of this class
+	// nothing else may reimplement. Both pointers borrow CCarousel's storage, so use them
+	// before anything can mutate the account list.
+	bool GetAccountCopyFields(std::uint32_t queryIndex, const char *&outUsername, const char *&outPassword) const;
+
 	void Update(float deltaSeconds) override;
 	void Draw(CDrawList &drawList) override;
 
@@ -174,8 +184,7 @@ class CAccountModal : public CWidget {
 	// scroll content height) so they can never disagree with each other about where a row
 	// actually is. outTops/outHeights must each have room for count entries (callers already
 	// size these off kCarouselMaxVisibleAccounts, matching refs itself).
-	void ComputeRowLayout(const VisibleAccountRef *refs, std::uint32_t count, float *outTops,
-						  float *outHeights) const;
+	void ComputeRowLayout(const VisibleAccountRef *refs, std::uint32_t count, float *outTops, float *outHeights) const;
 	float AccountsContentHeight(const float *tops, const float *heights, std::uint32_t count) const;
 	Rect AccountsScrollbarTrackRect(Rect scrollRegion) const;
 	Rect CloseBadgeRect(Rect left) const;
@@ -187,7 +196,7 @@ class CAccountModal : public CWidget {
 	float EditFormContentOffsetY(Rect right) const;
 	Rect EditFieldBlockRect(Rect right, std::uint32_t index, float yOffset) const;
 	Rect EditFieldInputRect(Rect block) const;
-	Rect VisibilityChipRect(Rect right, float yOffset) const;
+	Rect VisibilityChipRect(Rect right) const;
 	Rect EditCancelButtonRect(Rect save) const;
 	Rect EditDeleteButtonRect(Rect footer) const;
 	Rect PasswordRevealButtonRect(Rect passwordField) const;

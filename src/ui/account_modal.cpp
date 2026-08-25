@@ -52,15 +52,19 @@ constexpr float kRowBottomPadding = 10.0f;
 constexpr float kRowButtonGap = 10.0f;
 
 constexpr float kLoginButtonWidth = 108.0f;
+// The gap *between* two footer buttons. Their outer edges use kRowPadding instead, so the
+// primary action's right edge lands on the same column as the account rows and the edit
+// form's fields above it - at kLoginButtonMargin they sat 8px inside that line, which is
+// exactly the kind of near-miss that reads as sloppy without being obviously wrong.
 constexpr float kLoginButtonMargin = 16.0f;
 
 // The "visible in N games" chip's own icon + count number - see VisibilityChipRect and
 // DrawEditAccount, the one place both its size and its drawing are computed, so they
 // can't disagree about how wide the chip needs to be to fit its own content.
-constexpr float kVisibilityChipIconSize = 20.0f;
-constexpr float kVisibilityChipIconInset = 12.0f;
-constexpr float kVisibilityChipIconGap = 8.0f;
-constexpr float kVisibilityChipRightPadding = 16.0f;
+constexpr float kVisibilityChipIconSize = 16.0f;
+constexpr float kVisibilityChipIconInset = 10.0f;
+constexpr float kVisibilityChipIconGap = 7.0f;
+constexpr float kVisibilityChipRightPadding = 12.0f;
 
 float PanelMaxSizeScale(const CFontManager &fonts)
 {
@@ -213,10 +217,10 @@ void DrawEyeGlyph(CDrawList &drawList, CAssetManager &assets, Rect rect, bool re
 constexpr float kIndicatorOuterRadius = 40.0f;
 constexpr float kIndicatorRingThickness = 8.0f;
 constexpr float kIndicatorInnerRadius = kIndicatorOuterRadius - kIndicatorRingThickness;
-constexpr float kIndicatorGlowMargin = 22.0f;			// how far the shader's halo can bloom outward
-constexpr float kIndicatorSweepDeg = 112.0f;			// the comet-tail arc's angular length
+constexpr float kIndicatorGlowMargin = 22.0f;		  // how far the shader's halo can bloom outward
+constexpr float kIndicatorSweepDeg = 112.0f;		  // the comet-tail arc's angular length
 constexpr float kIndicatorRotationDegPerSec = 260.0f; // how fast the in-progress sweep spins
-constexpr float kIndicatorFullSweepDeg = 360.0f;		// CDrawList::AddCircularProgress's "solid ring" sentinel
+constexpr float kIndicatorFullSweepDeg = 360.0f;	  // CDrawList::AddCircularProgress's "solid ring" sentinel
 
 // Reflects what CLoginAttempt's worker (core/login_attempt.cpp) actually does at each stage
 // now that it drives a real CRiotClient instead of a fake timed sequence - WAITING_FOR_PROCESS
@@ -416,7 +420,7 @@ Rect CAccountModal::CloseBadgeRect(Rect left) const
 Rect CAccountModal::LoginButtonRect(Rect footer) const
 {
 	const float height = ActionButtonHeightFor(m_fonts);
-	return Rect{footer.X + footer.W - kLoginButtonMargin - kLoginButtonWidth, footer.Y + (footer.H - height) * 0.5f,
+	return Rect{footer.X + footer.W - kRowPadding - kLoginButtonWidth, footer.Y + (footer.H - height) * 0.5f,
 				kLoginButtonWidth, height};
 }
 
@@ -449,15 +453,17 @@ Rect CAccountModal::AddAccountButtonRect(Rect right) const
 	return Rect{right.X + right.W - kRowPadding - size, right.Y + (headerHeight - size) * 0.5f, size, size};
 }
 
-// The 4 stacked blocks (Username/Note/Password/visibility chip) settle into the upper
-// portion of the available space (weighted well above dead-center) rather than a large
-// dead gap before the footer, or being perfectly centered the way most dialogs don't lay
-// out a short form.
+// The three stacked blocks (Username/Note/Password) settle into the upper portion of the
+// available space (weighted above dead-center) rather than leaving a large dead gap before
+// the footer, or being perfectly centered the way most dialogs don't lay out a short form.
+// Three, not four: the visibility chip moved out of the stack and into the header (see
+// VisibilityChipRect), where it belongs - it selects which games this account shows up
+// under, which is a property of the account, not a fourth thing to type.
 float CAccountModal::EditFormContentOffsetY(Rect right) const
 {
 	const float available = right.H - HeaderHeightFor(m_fonts);
-	const float contentHeight = EditFieldBlockHeightFor(m_fonts) * 4.0f;
-	return std::max(0.0f, (available - contentHeight) * 0.22f);
+	const float contentHeight = EditFieldBlockHeightFor(m_fonts) * 3.0f;
+	return std::max(0.0f, (available - contentHeight) * 0.28f);
 }
 
 Rect CAccountModal::EditFieldBlockRect(Rect right, std::uint32_t index, float yOffset) const
@@ -477,20 +483,19 @@ Rect CAccountModal::EditFieldInputRect(Rect block) const
 	return Rect{block.X, block.Y + labelHeight + kEditFieldLabelGap, block.W, EditFieldInputHeightFor(m_fonts)};
 }
 
-// Occupies the 4th stacked block position, right after Username/Note/Password. A pill
-// (icon + its own visible-game count, plain text - see DrawEditAccount), sized to fit
-// exactly that content rather than a fixed width: a floating count badge here used to
-// clip into the very popup this chip opens (anchored right at its own edge, chip itself
-// below), a real reported bug that giving the number its own place in the chip's normal
-// layout avoids entirely.
-Rect CAccountModal::VisibilityChipRect(Rect right, float yOffset) const
+// Top-right of the form's header, directly opposite the "Edit Account"/"Add Account"
+// title - the same slot the account list's own + button occupies in its header, and the
+// same height, so switching between the two modes doesn't move the header's furniture
+// around. Sized to fit its content (icon + count) rather than to a fixed width.
+//
+// This used to be a fourth block stacked under Password, which put a control that opens a
+// popup in the middle of a column of things you type, and left the popup itself unfolding
+// out of the form's midsection. In the header it reads as what it is: a property of the
+// account being edited, set once, next to that account's title.
+Rect CAccountModal::VisibilityChipRect(Rect right) const
 {
-	// Same input-row band as EditFieldInputRect - reads as a real field, label and all
-	// (see DrawEditAccount), not a stray icon in the block's empty label row.
-	const Rect block = EditFieldBlockRect(right, 3, yOffset);
-	const float labelHeight = m_fonts.GetSecondary().GetLineHeight();
-	const float y = block.Y + labelHeight + kEditFieldLabelGap;
-	const float height = EditFieldInputHeightFor(m_fonts);
+	const float headerHeight = HeaderHeightFor(m_fonts);
+	const float height = RowButtonSizeFor(m_fonts);
 
 	char countBuffer[16];
 	const std::uint64_t countLen = FormatVisibleGameCountText(m_gameSelect.GetMask(), countBuffer, sizeof(countBuffer));
@@ -498,7 +503,7 @@ Rect CAccountModal::VisibilityChipRect(Rect right, float yOffset) const
 
 	const float width = kVisibilityChipIconInset + kVisibilityChipIconSize + kVisibilityChipIconGap + countTextW +
 						kVisibilityChipRightPadding;
-	return Rect{block.X, y, width, height};
+	return Rect{right.X + right.W - kRowPadding - width, right.Y + (headerHeight - height) * 0.5f, width, height};
 }
 
 // Save reuses LoginButtonRect's exact geometry so the primary action always lands in the
@@ -512,7 +517,7 @@ Rect CAccountModal::EditCancelButtonRect(Rect save) const
 Rect CAccountModal::EditDeleteButtonRect(Rect footer) const
 {
 	const float height = ActionButtonHeightFor(m_fonts);
-	return Rect{footer.X + kLoginButtonMargin, footer.Y + (footer.H - height) * 0.5f, kLoginButtonWidth, height};
+	return Rect{footer.X + kRowPadding, footer.Y + (footer.H - height) * 0.5f, kLoginButtonWidth, height};
 }
 
 constexpr float kPasswordRevealButtonSize = 24.0f;
@@ -662,6 +667,22 @@ void CAccountModal::StartEditAccount(std::uint32_t queryIndex)
 		mask, &m_carousel.GetBanner(0), m_carousel.GetBannerCount(), Rect{},
 		Rect{0.0f, 0.0f, static_cast<float>(m_window.GetWidth()), static_cast<float>(m_window.GetHeight())});
 	m_gameSelect.Close();
+}
+
+bool CAccountModal::GetAccountCopyFields(std::uint32_t queryIndex, const char *&outUsername,
+										 const char *&outPassword) const
+{
+	if (m_nBannerIndex < 0) {
+		return false;
+	}
+	VisibleAccountRef ref{};
+	if (!ResolveVisibleAccount(static_cast<std::uint32_t>(m_nBannerIndex), queryIndex, ref)) {
+		return false;
+	}
+	const CAccount &account = m_carousel.GetBanner(ref.BannerIndex).Accounts[ref.AccountIndex];
+	outUsername = account.m_szUsername;
+	outPassword = account.m_szPassword;
+	return true;
 }
 
 void CAccountModal::RemoveAccountRow(std::uint32_t queryIndex)
@@ -879,7 +900,7 @@ bool CAccountModal::OnPointerUp(float x, float y)
 		}
 	} else if (m_mode == EAccountModalMode::ACCOUNT_MODAL_MODE_EDIT_ACCOUNT) {
 		const float formOffsetY = EditFormContentOffsetY(layout.Right);
-		const Rect chip = VisibilityChipRect(layout.Right, formOffsetY);
+		const Rect chip = VisibilityChipRect(layout.Right);
 
 		// The popup takes priority over everything else in the form while open - a click
 		// either toggles one of its rows or (missing the popup entirely) closes it, same
@@ -904,8 +925,8 @@ bool CAccountModal::OnPointerUp(float x, float y)
 			return true;
 		}
 
-		const Rect usernameField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 0, formOffsetY));
-		const Rect noteField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 1, formOffsetY));
+		const Rect noteField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 0, formOffsetY));
+		const Rect usernameField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 1, formOffsetY));
 		const Rect passwordField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 2, formOffsetY));
 
 		if (RectContainsPoint(PasswordRevealButtonRect(passwordField), x, y)) {
@@ -1041,12 +1062,12 @@ ECursorKind CAccountModal::GetDesiredCursor() const
 		}
 
 		const float formOffsetY = EditFormContentOffsetY(layout.Right);
-		if (RectContainsPoint(VisibilityChipRect(layout.Right, formOffsetY), m_flMouseX, m_flMouseY)) {
+		if (RectContainsPoint(VisibilityChipRect(layout.Right), m_flMouseX, m_flMouseY)) {
 			return ECursorKind::CURSOR_HAND;
 		}
 
-		const Rect usernameField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 0, formOffsetY));
-		const Rect noteField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 1, formOffsetY));
+		const Rect noteField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 0, formOffsetY));
+		const Rect usernameField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 1, formOffsetY));
 		const Rect passwordField = EditFieldInputRect(EditFieldBlockRect(layout.Right, 2, formOffsetY));
 
 		if (RectContainsPoint(PasswordRevealButtonRect(passwordField), m_flMouseX, m_flMouseY)) {
@@ -1065,7 +1086,8 @@ ECursorKind CAccountModal::GetDesiredCursor() const
 		if (m_editUsername.GetValue().Length > 0 && RectContainsPoint(save, m_flMouseX, m_flMouseY)) {
 			return ECursorKind::CURSOR_HAND;
 		}
-		if (m_nEditAccountIndex >= 0 && RectContainsPoint(EditDeleteButtonRect(layout.Footer), m_flMouseX, m_flMouseY)) {
+		if (m_nEditAccountIndex >= 0 &&
+			RectContainsPoint(EditDeleteButtonRect(layout.Footer), m_flMouseX, m_flMouseY)) {
 			return ECursorKind::CURSOR_HAND;
 		}
 	}
@@ -1167,16 +1189,19 @@ bool CAccountModal::OnKeyDown(std::uint32_t keyCode)
 		return true;
 	}
 
+	// Tab walks the fields in the order they're actually drawn (Note, Username, Password,
+	// wrapping back to Note) - a tab order that doesn't match what's on screen is worse
+	// than no tab order at all.
 	if (keyCode == VK_TAB) {
-		if (m_editUsername.m_bFocused) {
-			m_editUsername.m_bFocused = false;
-			m_editNote.m_bFocused = true;
-		} else if (m_editNote.m_bFocused) {
+		if (m_editNote.m_bFocused) {
 			m_editNote.m_bFocused = false;
+			m_editUsername.m_bFocused = true;
+		} else if (m_editUsername.m_bFocused) {
+			m_editUsername.m_bFocused = false;
 			m_editPassword.m_bFocused = true;
 		} else if (m_editPassword.m_bFocused) {
 			m_editPassword.m_bFocused = false;
-			m_editUsername.m_bFocused = true;
+			m_editNote.m_bFocused = true;
 		}
 		return true;
 	}
@@ -1210,7 +1235,8 @@ void CAccountModal::DrawSectionTitle(CDrawList &drawList, Rect right, float head
 									 std::uint8_t alpha) const
 {
 	const CFont &body = m_fonts.GetBody();
-	DrawText(drawList, body, right.X + kRowPadding, right.Y + (headerHeight + body.GetAscent()) * 0.5f, title,
+	DrawText(drawList, body, right.X + kRowPadding,
+			 right.Y + headerHeight * 0.5f + (body.GetAscent() + body.GetDescent()) * 0.5f, title,
 			 ColorFadeAlpha(kColorTextBright, alpha));
 	// Closes the header off from whatever's below it.
 	drawList.AddRectFilled(right.X + kRowPadding, right.Y + headerHeight, right.W - kRowPadding * 2.0f, 1.0f,
@@ -1238,7 +1264,8 @@ void CAccountModal::DrawAddAccountButton(CDrawList &drawList, Rect right, std::u
 	const Rect iconRect{button.X + (button.W - kIconSize) * 0.5f, button.Y + (button.H - kIconSize) * 0.5f, kIconSize,
 						kIconSize};
 	drawList.AddRectRoundedTextured(iconRect.X, iconRect.Y, iconRect.W, iconRect.H, kCornerRadiiNone,
-									m_assets.GetIconAdd(), ColorFadeAlpha(hover ? kColorTextBright : kColorTextDim, alpha));
+									m_assets.GetIconAdd(),
+									ColorFadeAlpha(hover ? kColorTextBright : kColorTextDim, alpha));
 }
 
 void CAccountModal::DrawAccountRow(CDrawList &drawList, Rect right, Rect row, const CAccount &account, bool isSelected,
@@ -1305,7 +1332,8 @@ void CAccountModal::DrawAccountRow(CDrawList &drawList, Rect right, Rect row, co
 	}
 
 	// Remove still has no embedded icon - its hand-drawn X glyph stays until one exists.
-	constexpr float kEditIconInset = 5.0f; // editRect is a circular hover badge - inset so the icon doesn't touch its edge
+	constexpr float kEditIconInset =
+		5.0f; // editRect is a circular hover badge - inset so the icon doesn't touch its edge
 	drawList.AddRectRoundedTextured(editRect.X + kEditIconInset, editRect.Y + kEditIconInset,
 									editRect.W - kEditIconInset * 2.0f, editRect.H - kEditIconInset * 2.0f,
 									kCornerRadiiNone, m_assets.GetIconEdit(),
@@ -1370,8 +1398,7 @@ void CAccountModal::DrawLoginProgress(CDrawList &drawList, Rect right, std::uint
 	// A soft breathing bloom behind the ring while a stage is in flight; terminal stages
 	// hold it steady instead, so the ring reads as settled the instant it lands rather than
 	// still visibly animating.
-	const float glowPulse =
-		terminal ? 1.0f : 0.55f + 0.45f * (0.5f + 0.5f * std::sin(m_flLoginElapsedSeconds * 2.6f));
+	const float glowPulse = terminal ? 1.0f : 0.55f + 0.45f * (0.5f + 0.5f * std::sin(m_flLoginElapsedSeconds * 2.6f));
 	const float glowStrength = 0.85f * glowPulse * (static_cast<float>(alpha) / 255.0f);
 
 	// Terminal stages draw a full solid ring; an in-flight stage draws a comet-tail arc
@@ -1380,9 +1407,9 @@ void CAccountModal::DrawLoginProgress(CDrawList &drawList, Rect right, std::uint
 	// glow entirely per-pixel, so the whole indicator stays smooth at any size instead of
 	// faceting like tessellated geometry would.
 	const float sweepAngleDeg = terminal ? kIndicatorFullSweepDeg : kIndicatorSweepDeg;
-	const float startAngleDeg =
-		terminal ? 0.0f
-				 : std::fmod(m_flLoginElapsedSeconds * kIndicatorRotationDegPerSec, 360.0f) - 90.0f - kIndicatorSweepDeg;
+	const float startAngleDeg = terminal ? 0.0f
+										 : std::fmod(m_flLoginElapsedSeconds * kIndicatorRotationDegPerSec, 360.0f) -
+											   90.0f - kIndicatorSweepDeg;
 
 	drawList.AddCircularProgress(cx, cy, kIndicatorOuterRadius, kIndicatorInnerRadius, kIndicatorGlowMargin,
 								 startAngleDeg, sweepAngleDeg, glowStrength, ColorFadeAlpha(stageColor, alpha));
@@ -1390,10 +1417,13 @@ void CAccountModal::DrawLoginProgress(CDrawList &drawList, Rect right, std::uint
 	if (terminal) {
 		if (stage == ELoginStage::LOGIN_STAGE_SUCCESS) {
 			drawList.AddLine(cx - 13.0f, cy, cx - 3.0f, cy + 11.0f, 4.0f, ColorFadeAlpha(kColorTextBright, alpha));
-			drawList.AddLine(cx - 3.0f, cy + 11.0f, cx + 15.0f, cy - 11.0f, 4.0f, ColorFadeAlpha(kColorTextBright, alpha));
+			drawList.AddLine(cx - 3.0f, cy + 11.0f, cx + 15.0f, cy - 11.0f, 4.0f,
+							 ColorFadeAlpha(kColorTextBright, alpha));
 		} else {
-			drawList.AddLine(cx - 11.0f, cy - 11.0f, cx + 11.0f, cy + 11.0f, 4.0f, ColorFadeAlpha(kColorTextBright, alpha));
-			drawList.AddLine(cx - 11.0f, cy + 11.0f, cx + 11.0f, cy - 11.0f, 4.0f, ColorFadeAlpha(kColorTextBright, alpha));
+			drawList.AddLine(cx - 11.0f, cy - 11.0f, cx + 11.0f, cy + 11.0f, 4.0f,
+							 ColorFadeAlpha(kColorTextBright, alpha));
+			drawList.AddLine(cx - 11.0f, cy + 11.0f, cx + 11.0f, cy - 11.0f, 4.0f,
+							 ColorFadeAlpha(kColorTextBright, alpha));
 		}
 	}
 
@@ -1418,7 +1448,8 @@ void CAccountModal::DrawLoginProgress(CDrawList &drawList, Rect right, std::uint
 	float lineY = cy + kIndicatorOuterRadius + 40.0f;
 	for (std::uint32_t i = 0; i < lineCount; i += 1) {
 		const float lineWidth = TextWidth(body, messageLines[i]);
-		DrawText(drawList, body, cx - lineWidth * 0.5f, lineY, messageLines[i], ColorFadeAlpha(kColorTextBright, alpha));
+		DrawText(drawList, body, cx - lineWidth * 0.5f, lineY, messageLines[i],
+				 ColorFadeAlpha(kColorTextBright, alpha));
 		lineY += body.GetLineHeight();
 	}
 }
@@ -1455,9 +1486,14 @@ void CAccountModal::DrawEditAccount(CDrawList &drawList, Rect right, std::uint8_
 		m_nEditAccountIndex < 0 ? StringViewFromCString("Add Account") : StringViewFromCString("Edit Account");
 	DrawSectionTitle(drawList, right, headerHeight, title, alpha);
 
+	// Note first, then Username: the note is what identifies an account to the person
+	// reading the list (it's the line the account rows show under the username), so it's the
+	// field the eye should land on first. Block index is the only thing that orders these -
+	// every hit-test below reads the same indices, so the two can't drift apart.
 	const float formOffsetY = EditFormContentOffsetY(right);
-	DrawEditField(drawList, EditFieldBlockRect(right, 0, formOffsetY), "Username", m_editUsername, false, alpha);
-	DrawEditField(drawList, EditFieldBlockRect(right, 1, formOffsetY), "Note", m_editNote, false, alpha);
+	DrawEditField(drawList, EditFieldBlockRect(right, 0, formOffsetY), "Note", m_editNote, false, alpha);
+	// (the visibility chip is drawn below, after the fields, so its popup layers over them)
+	DrawEditField(drawList, EditFieldBlockRect(right, 1, formOffsetY), "Username", m_editUsername, false, alpha);
 	DrawEditField(drawList, EditFieldBlockRect(right, 2, formOffsetY), "Password", m_editPassword,
 				  !m_bEditPasswordRevealed, alpha);
 
@@ -1467,12 +1503,11 @@ void CAccountModal::DrawEditAccount(CDrawList &drawList, Rect right, std::uint8_
 	DrawEyeGlyph(drawList, m_assets, reveal, m_bEditPasswordRevealed,
 				 ColorFadeAlpha(hoverReveal ? kColorTextBright : kColorTextDim, alpha));
 
-	// A pill (icon + its own visible-game count, plain dim/bright text - no colored
-	// badge, no absolute-positioned overlay) - see VisibilityChipRect for why it's sized
-	// to fit that content exactly, and kVisibilityChipIconSize's own comment for why the
-	// icon itself stays a fixed size regardless. No label above it (unlike Username/Note/
-	// Password) - "N games" already says what this is on its own.
-	const Rect chip = VisibilityChipRect(right, formOffsetY);
+	// A pill (icon + its own visible-game count) in the header, opposite the title - see
+	// VisibilityChipRect for why it lives there and why it's sized to fit that content
+	// exactly. No label beside it: "N games" already says what it is, and a header has no
+	// room for a caption anyway.
+	const Rect chip = VisibilityChipRect(right);
 	const bool hoverChip = RectContainsPoint(chip, m_flMouseX, m_flMouseY);
 
 	// Always has a real border+fill, like the other fields' own unfocused state - a
@@ -1523,7 +1558,8 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 		const float helperX = m_nEditAccountIndex < 0
 								  ? footer.X + kRowPadding
 								  : EditDeleteButtonRect(footer).X + kLoginButtonWidth + kRowPadding;
-		DrawText(drawList, secondary, helperX, footer.Y + (footer.H + secondary.GetAscent()) * 0.5f, helperText,
+		DrawText(drawList, secondary, helperX,
+				 footer.Y + footer.H * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f, helperText,
 				 ColorFadeAlpha(kColorTextFaint, alpha));
 
 		const Rect save = LoginButtonRect(footer);
@@ -1565,7 +1601,8 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 		}
 	} else if (m_mode == EAccountModalMode::ACCOUNT_MODAL_MODE_LOGIN_PROGRESS) {
 		const bool terminal = !HasPendingLogin() && CLoginAttempt::IsTerminalStage(m_login.GetStage());
-		DrawText(drawList, secondary, footer.X + kRowPadding, footer.Y + (footer.H + secondary.GetAscent()) * 0.5f,
+		DrawText(drawList, secondary, footer.X + kRowPadding,
+				 footer.Y + footer.H * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f,
 				 terminal ? StringViewFromCString("") : StringViewFromCString("Logging in..."),
 				 ColorFadeAlpha(kColorTextFaint, alpha));
 
@@ -1583,7 +1620,8 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 						 terminal ? StringViewFromCString("Back") : StringViewFromCString("Cancel"),
 						 ColorFadeAlpha(kColorTextBright, alpha));
 	} else {
-		DrawText(drawList, secondary, footer.X + kRowPadding, footer.Y + (footer.H + secondary.GetAscent()) * 0.5f,
+		DrawText(drawList, secondary, footer.X + kRowPadding,
+				 footer.Y + footer.H * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f,
 				 StringViewFromCString("Select an account to log in"), ColorFadeAlpha(kColorTextFaint, alpha));
 
 		// Not gated on m_login.IsActive(): pressing Login during an attempt replaces it - see

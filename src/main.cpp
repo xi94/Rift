@@ -72,12 +72,11 @@ constexpr ColorF kColorBackground{18.0f / 255.0f, 18.0f / 255.0f, 20.0f / 255.0f
 // read as clearly as a 1px line does.
 constexpr Color kColorChromeSeam{46, 46, 50, 255};
 
-constexpr std::uint32_t kContextMenuIdOpen = 1;
-constexpr std::uint32_t kContextMenuIdLogin = 2;
-constexpr std::uint32_t kContextMenuIdCopyPassword = 3;
-constexpr std::uint32_t kContextMenuIdAddAccount = 4;
-constexpr std::uint32_t kContextMenuIdEditAccount = 5;
-constexpr std::uint32_t kContextMenuIdDeleteAccount = 6;
+// The account row's right-click menu, which is the only context menu left in the app - the
+// carousel's own (Open / Login / Copy Password / Add Account) is gone, since every one of
+// those was already a plain left-click away on the card or inside the list it opens.
+constexpr std::uint32_t kContextMenuIdCopyUsername = 1;
+constexpr std::uint32_t kContextMenuIdCopyPassword = 2;
 
 // accounts.bin and settings.bin are independent files (see core/storage.h's own file
 // comment for why) with independent atomic writes - SaveAccountsNow/SaveSettingsNow let a
@@ -133,21 +132,21 @@ EStorageLoadResult LoadNow(CCarousel &carousel, CSettings &settings, const CMast
 
 // Copies an account's password to the system clipboard as plain Unicode text - the carousel
 // context menu's "Copy Password" action.
-void CopyPasswordToClipboard(HWND owner, const char *pPassword)
+void CopyTextToClipboard(HWND owner, const char *pText)
 {
 	if (!OpenClipboard(owner)) {
 		return;
 	}
 	EmptyClipboard();
 
-	const auto passwordLength = static_cast<int>(std::strlen(pPassword));
-	const int wideLength = MultiByteToWideChar(CP_UTF8, 0, pPassword, passwordLength, nullptr, 0);
+	const auto textLength = static_cast<int>(std::strlen(pText));
+	const int wideLength = MultiByteToWideChar(CP_UTF8, 0, pText, textLength, nullptr, 0);
 	const HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, (static_cast<SIZE_T>(wideLength) + 1) * sizeof(wchar_t));
 	if (memory != nullptr) {
 		auto *pDestination = static_cast<wchar_t *>(GlobalLock(memory));
 		if (pDestination != nullptr) {
 			if (wideLength > 0) {
-				MultiByteToWideChar(CP_UTF8, 0, pPassword, passwordLength, pDestination, wideLength);
+				MultiByteToWideChar(CP_UTF8, 0, pText, textLength, pDestination, wideLength);
 			}
 			pDestination[wideLength] = L'\0';
 			GlobalUnlock(memory);
@@ -266,47 +265,49 @@ void DrawStatusBarVersion(CDrawList &drawList, CFontManager &fonts, float status
 	// independently-tuned pieces of text.
 	constexpr float kBaselineVisualNudge = 2.0f;
 	const float baselineY = statusBarY + statusBarHeight * 0.5f +
-							 (secondary.GetAscent() + secondary.GetDescent()) * 0.5f - kBaselineVisualNudge;
+							(secondary.GetAscent() + secondary.GetDescent()) * 0.5f - kBaselineVisualNudge;
 	DrawText(drawList, secondary, kStatusBarVersionPadding, baselineY, versionText, Color{158, 158, 166, 255});
 }
 
 void RenderFrame(RenderContext &context)
 {
-	  CWindow &window = *context.pWindow;
-	  const float width = static_cast<float>(window.GetWidth());
-	  const float height = static_cast<float>(window.GetHeight());
+	CWindow &window = *context.pWindow;
+	const float width = static_cast<float>(window.GetWidth());
+	const float height = static_cast<float>(window.GetHeight());
 
-	  context.pDrawList->Clear();
+	context.pDrawList->Clear();
 
-	  // The title bar/status bar chrome - including the version number (DrawStatusBarVersion)
-	  // - stays visible even on the master-password screen now, not just once unlocked: only
-	  // the carousel's own content (its cards, and the view-mode text this same bar's right
-	  // side shows - see DrawStatusBarContent) actually waits on m_bVisible, which main.cpp
-	  // keeps in sync with the unlock state independently of this chrome.
-	  context.pDrawList->AddRectFilled(0.0f, kTitleBarHeight, width, 1.0f, kColorChromeSeam);
-	  context.pDrawList->AddRectFilled(0.0f, height - kStatusBarHeight - 1.0f, width, 1.0f, kColorChromeSeam);
-	  context.pDrawList->AddRectFilled(0.0f, height - kStatusBarHeight, width, kStatusBarHeight, kTitleBarColor);
-	  DrawStatusBarVersion(*context.pDrawList, *context.pFonts, height - kStatusBarHeight, kStatusBarHeight);
-	  if (context.pCarousel->m_bVisible) {
-		    context.pCarousel->DrawStatusBarContent(*context.pDrawList);
-	  }
+	// The title bar/status bar chrome - including the version number (DrawStatusBarVersion)
+	// - stays visible even on the master-password screen now, not just once unlocked: only
+	// the carousel's own content (its cards, and the view-mode text this same bar's right
+	// side shows - see DrawStatusBarContent) actually waits on m_bVisible, which main.cpp
+	// keeps in sync with the unlock state independently of this chrome.
+	context.pDrawList->AddRectFilled(0.0f, kTitleBarHeight, width, 1.0f, kColorChromeSeam);
+	context.pDrawList->AddRectFilled(0.0f, height - kStatusBarHeight - 1.0f, width, 1.0f, kColorChromeSeam);
+	context.pDrawList->AddRectFilled(0.0f, height - kStatusBarHeight, width, kStatusBarHeight, kTitleBarColor);
+	DrawStatusBarVersion(*context.pDrawList, *context.pFonts, height - kStatusBarHeight, kStatusBarHeight);
+	if (context.pCarousel->m_bVisible) {
+		context.pCarousel->DrawStatusBarContent(*context.pDrawList);
+	}
 
-	  context.pStack->Draw(*context.pDrawList);
-	  context.pDrawList->Finish();
+	context.pStack->Draw(*context.pDrawList);
+	context.pDrawList->Finish();
 
-	  context.pRenderer->BeginFrame();
-	  context.pRenderer->Clear(kColorBackground);
-	  SubmitDrawList(*context.pRenderer, *context.pDrawList);
-	  context.pRenderer->EndFrame();
+	context.pRenderer->BeginFrame();
+	context.pRenderer->Clear(kColorBackground);
+	SubmitDrawList(*context.pRenderer, *context.pDrawList);
+	context.pRenderer->EndFrame();
 }
 
 // Called synchronously from WM_SIZE while a border drag is in progress.
 void OnWindowResize(void *pUserData)
 {
-    auto *pContext = static_cast<RenderContext *>(pUserData);
-    // hmmmmm
-    pContext->pRenderer->Resize(pContext->pWindow->GetPhysicalWidth(), pContext->pWindow->GetPhysicalHeight(), static_cast<float>(pContext->pWindow->GetWidth()), static_cast<float>(pContext->pWindow->GetHeight()));
-	  RenderFrame(*pContext);
+	auto *pContext = static_cast<RenderContext *>(pUserData);
+	// hmmmmm
+	pContext->pRenderer->Resize(pContext->pWindow->GetPhysicalWidth(), pContext->pWindow->GetPhysicalHeight(),
+								static_cast<float>(pContext->pWindow->GetWidth()),
+								static_cast<float>(pContext->pWindow->GetHeight()));
+	RenderFrame(*pContext);
 }
 
 // Bundles the extra state OnWindowDpiChanged needs beyond RenderContext - the font
@@ -342,7 +343,7 @@ int main(int argc, char *argv[])
 	// process instance has nothing further to do (it either just relaunched a repaired copy
 	// of itself, or there's nothing for it to do at all) - main() ends here, full stop.
 	if (CUpdater::RunStartupRecoveryAndMaybeExit()) {
-		  return 0;
+		return 0;
 	}
 
 	// Before literally anything else - see crash_handler.h's own file comment. Every mechanism
@@ -388,14 +389,14 @@ int main(int argc, char *argv[])
 	// early, before any worker thread exists (see sodium_init's own docs: it's not safe to
 	// call concurrently with any other libsodium function, only with itself).
 	if (sodium_init() < 0) {
-	  	std::println("Failed to initialize libsodium.");
-		  return 1;
+		std::println("Failed to initialize libsodium.");
+		return 1;
 	}
 
 	CMemoryArena persistentArena;
 	if (!persistentArena.Init(kPersistentArenaCapacity)) {
-		  std::println("Failed to reserve persistent arena.");
-		  return 1;
+		std::println("Failed to reserve persistent arena.");
+		return 1;
 	}
 
 	// Read just the window size ahead of everything else settings-related below (CSettings
@@ -410,28 +411,28 @@ int main(int argc, char *argv[])
 
 	CWindow window;
 	if (!window.Create(L"Rift", bootSettings.m_nWindowWidth, bootSettings.m_nWindowHeight)) {
-		  std::println("Failed to create window.");
-		  return 1;
+		std::println("Failed to create window.");
+		return 1;
 	}
 
 	CRendererD3D11 renderer;
 	const RendererConfig rendererConfig{window.GetHandle(), window.GetPhysicalWidth(), window.GetPhysicalHeight(),
 										static_cast<float>(window.GetWidth()), static_cast<float>(window.GetHeight())};
 	if (!renderer.Init(rendererConfig)) {
-		  std::println("Failed to initialize renderer.");
-		  return 1;
+		std::println("Failed to initialize renderer.");
+		return 1;
 	}
 
 	CAssetManager assets;
 	if (!assets.Load(renderer)) {
-		  std::println("Failed to load one or more embedded assets.");
-		  return 1;
+		std::println("Failed to load one or more embedded assets.");
+		return 1;
 	}
 
 	CFontManager fonts;
 	if (!fonts.Load(renderer, window.GetDpiScale())) {
-		  std::println("Failed to load the UI font.");
-		  return 1;
+		std::println("Failed to load the UI font.");
+		return 1;
 	}
 
 	CTray tray;
@@ -486,8 +487,7 @@ int main(int argc, char *argv[])
 	for (std::int32_t i = 0; i < static_cast<std::int32_t>(ARRAYSIZE(games)); i += 1) {
 		// AddBanner appends, so this iteration's banner index is i - the same index the tray
 		// stores its icon under, which is the whole point of doing both from one loop.
-		pCarousel->AddBanner(StringViewFromCString(games[i].pTitle), games[i].pBanner, games[i].pIcon,
-							 games[i].Accent);
+		pCarousel->AddBanner(StringViewFromCString(games[i].pTitle), games[i].pBanner, games[i].pIcon, games[i].Accent);
 		tray.SetGameIcon(i, games[i].TrayIconBytes.pBytes, games[i].TrayIconBytes.Length);
 	}
 
@@ -539,10 +539,10 @@ int main(int argc, char *argv[])
 	auto pModalOwned = std::make_unique<CAccountModal>(fonts, *pCarousel, window, settings, assets);
 	CAccountModal *pModal = pModalOwned.get();
 
-	auto pSettingsMenuOwned = std::make_unique<CSettingsMenu>(fonts, assets, appLocked);
+	auto pSettingsMenuOwned = std::make_unique<CSettingsMenu>(fonts, assets, settings, appLocked);
 	CSettingsMenu *pSettingsMenu = pSettingsMenuOwned.get();
 
-	auto pSettingsPanelOwned = std::make_unique<CSettingsPanel>(fonts, settings, window, renderer);
+	auto pSettingsPanelOwned = std::make_unique<CSettingsPanel>(fonts, settings, window, renderer, assets);
 	CSettingsPanel *pSettingsPanel = pSettingsPanelOwned.get();
 
 	auto pContextMenuOwned = std::make_unique<CContextMenu>(fonts);
@@ -595,11 +595,10 @@ int main(int argc, char *argv[])
 	// frame regardless of whether anything changed.
 	bool bWindowExcludedFromCapture = false;
 
-	// Two right-click targets, disambiguated by which is currently >= 0 (opening one
-	// clears the other) rather than encoding the target into the context-menu item id
-	// itself - set whenever a right-click opens CContextMenu, read back once a selection
-	// comes in.
-	std::int32_t contextMenuTargetBannerIndex = -1;
+	// Which account row the open context menu belongs to - set when a right-click opens
+	// CContextMenu, read back once a selection comes out of it, and -1 whenever there's no
+	// menu in flight. Only one target kind exists now that the carousel has no menu of its
+	// own, so there's nothing left to disambiguate between.
 	std::int32_t contextMenuTargetAccountIndex = -1;
 
 	RenderContext renderContext{&window, &renderer, &drawList, &stack, pCarousel, &fonts};
@@ -805,70 +804,36 @@ int main(int argc, char *argv[])
 				pCarousel->m_bVisible = false;
 			}
 
-			// Right-click routing: neither CCarousel nor CAccountModal can open
-			// CContextMenu itself (they don't own that class) - poll whichever one just
-			// latched a hit and build/open the actual menu. PENDING_HIT_KIND_MISS from
-			// CCarousel still means "hit the carousel but no specific banner" (right-
-			// clicking empty space), which resolves to the centered banner, matching the
-			// original's own behavior; PENDING_HIT_KIND_NONE means nothing happened at all.
+			// Right-click routing: CAccountModal can't open CContextMenu itself (it doesn't
+			// own that class) - it latches which row was hit and this polls it, builds the
+			// menu, and serves the selection. Copy Username / Copy Password only: editing
+			// and deleting a row already have dedicated buttons on the row itself, and a
+			// menu whose every item duplicates a visible control earns nothing.
 			const PendingHit rightClickedRow = pModal->ConsumePendingRightClickRow();
-			const PendingHit rightClickedBanner = pCarousel->ConsumePendingRightClick();
 			if (rightClickedRow.Kind == EPendingHitKind::PENDING_HIT_KIND_INDEX) {
-				contextMenuTargetBannerIndex = -1;
 				contextMenuTargetAccountIndex = rightClickedRow.Index;
 				const ContextMenuItem items[]{
-					{StringViewFromCString("Edit"), kContextMenuIdEditAccount},
-					{StringViewFromCString("Delete"), kContextMenuIdDeleteAccount},
+					{StringViewFromCString("Copy Username"), kContextMenuIdCopyUsername},
+					{StringViewFromCString("Copy Password"), kContextMenuIdCopyPassword},
 				};
 
 				pContextMenu->Open(event.X, event.Y, items, 2, width, height);
-			} else if (rightClickedBanner.Kind != EPendingHitKind::PENDING_HIT_KIND_NONE) {
-				const std::int32_t targetBanner = rightClickedBanner.Kind == EPendingHitKind::PENDING_HIT_KIND_INDEX
-													  ? rightClickedBanner.Index
-													  : pCarousel->GetSelectedIndex();
-				if (targetBanner >= 0) {
-					contextMenuTargetBannerIndex = targetBanner;
-					contextMenuTargetAccountIndex = -1;
-					const CBanner &banner = pCarousel->GetBanner(static_cast<std::uint32_t>(targetBanner));
-					const bool hasAccounts = banner.AccountCount > 0;
-
-					ContextMenuItem items[4];
-					std::uint32_t itemCount = 0;
-					items[itemCount++] = {StringViewFromCString("Open"), kContextMenuIdOpen};
-					if (hasAccounts) {
-						items[itemCount++] = {StringViewFromCString("Login"), kContextMenuIdLogin};
-						items[itemCount++] = {StringViewFromCString("Copy Password"), kContextMenuIdCopyPassword};
-					}
-
-					items[itemCount++] = {StringViewFromCString("Add Account"), kContextMenuIdAddAccount};
-					pContextMenu->Open(event.X, event.Y, items, itemCount, width, height);
-				}
 			}
 
 			const std::uint32_t selected = pContextMenu->ConsumeSelection();
-			if (selected != kContextMenuNoSelection) {
-				if (selected == kContextMenuIdOpen && contextMenuTargetBannerIndex >= 0) {
-					pModal->Open(contextMenuTargetBannerIndex);
-				} else if (selected == kContextMenuIdLogin && contextMenuTargetBannerIndex >= 0) {
-					const CBanner &banner =
-						pCarousel->GetBanner(static_cast<std::uint32_t>(contextMenuTargetBannerIndex));
-					if (banner.AccountCount > 0) {
-						pModal->OpenForQuickLogin(contextMenuTargetBannerIndex, 0);
+			if (selected != kContextMenuNoSelection && contextMenuTargetAccountIndex >= 0) {
+				// Resolved through the modal rather than indexed into a banner here: a row's
+				// position in the visible list is not its position in storage (see
+				// ui/account_modal.h), and that mapping lives in exactly one place.
+				const char *pUsername = nullptr;
+				const char *pPassword = nullptr;
+				if (pModal->GetAccountCopyFields(static_cast<std::uint32_t>(contextMenuTargetAccountIndex), pUsername,
+												 pPassword)) {
+					if (selected == kContextMenuIdCopyUsername) {
+						CopyTextToClipboard(window.GetHandle(), pUsername);
+					} else if (selected == kContextMenuIdCopyPassword) {
+						CopyTextToClipboard(window.GetHandle(), pPassword);
 					}
-				} else if (selected == kContextMenuIdCopyPassword && contextMenuTargetBannerIndex >= 0) {
-					const CBanner &banner =
-						pCarousel->GetBanner(static_cast<std::uint32_t>(contextMenuTargetBannerIndex));
-					if (banner.AccountCount > 0) {
-						CopyPasswordToClipboard(window.GetHandle(), banner.Accounts[0].m_szPassword);
-					}
-				} else if (selected == kContextMenuIdAddAccount && contextMenuTargetBannerIndex >= 0) {
-					pModal->Open(contextMenuTargetBannerIndex);
-					pModal->StartAddAccount();
-				} else if (selected == kContextMenuIdEditAccount && contextMenuTargetAccountIndex >= 0) {
-					pModal->StartEditAccount(static_cast<std::uint32_t>(contextMenuTargetAccountIndex));
-				} else if (selected == kContextMenuIdDeleteAccount && contextMenuTargetAccountIndex >= 0) {
-					pModal->RemoveAccountRow(static_cast<std::uint32_t>(contextMenuTargetAccountIndex));
-					SaveNow(*pCarousel, settings, masterKey);
 				}
 			}
 

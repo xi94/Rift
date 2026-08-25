@@ -485,6 +485,43 @@ UvRect CDrawList::ComputeCoverUv(float boxW, float boxH, float textureW, float t
 	return UvRect{0.0f, 0.0f, 1.0f, 1.0f};
 }
 
+void CDrawList::AddRectTexturedRotated(float x, float y, float w, float h, float radians, const CTexture *pTexture,
+									   Color tint)
+{
+	SetTargetTexture(pTexture);
+
+	assert(m_nVertexCount + 4 <= m_nVertexCapacity);
+	assert(m_nIndexCount + 6 <= m_nIndexCapacity);
+
+	const std::uint32_t packed = ColorPack(tint);
+	const std::uint32_t base = m_nVertexCount;
+
+	const float cx = x + w * 0.5f;
+	const float cy = y + h * 0.5f;
+	const float cosAngle = std::cos(radians);
+	const float sinAngle = std::sin(radians);
+	const float hw = w * 0.5f;
+	const float hh = h * 0.5f;
+
+	// Corner offsets from the center, rotated - same winding (TL, TR, BR, BL) as every
+	// other quad here, so EmitQuadIndices below needs no special case.
+	const float offsetsX[4] = {-hw, hw, hw, -hw};
+	const float offsetsY[4] = {-hh, -hh, hh, hh};
+	const float uvs[4][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
+	for (std::uint32_t i = 0; i < 4; i += 1) {
+		m_pVertices[base + i] = {
+			.X = cx + offsetsX[i] * cosAngle - offsetsY[i] * sinAngle,
+			.Y = cy + offsetsX[i] * sinAngle + offsetsY[i] * cosAngle,
+			.U = uvs[i][0],
+			.V = uvs[i][1],
+			.Color = packed,
+		};
+	}
+	m_nVertexCount += 4;
+
+	EmitQuadIndices(base);
+}
+
 void CDrawList::AddRectTexturedUv(float x, float y, float w, float h, float u0, float v0, float u1, float v1,
 								  const CTexture *pTexture, Color tint)
 {

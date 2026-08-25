@@ -24,6 +24,7 @@
 #include "embeds/icons/ListIcon.hpp"
 #include "embeds/icons/MenuIcon.hpp"
 #include "embeds/icons/Minimize.hpp"
+#include "embeds/icons/ResetIcon.hpp"
 #include "embeds/icons/RuneterraIcon.hpp"
 #include "embeds/icons/Settings.hpp"
 #include "embeds/icons/TFTIcon.hpp"
@@ -142,6 +143,7 @@ bool CAssetManager::Load(IRenderer &renderer)
 		{icon::eye_visible_icon.data(), icon::eye_visible_icon.size(), "EyeVisible", &CAssetManager::m_pIconEyeVisible},
 		{icon::eye_hidden_icon.data(), icon::eye_hidden_icon.size(), "EyeHiddenIcon", &CAssetManager::m_pIconEyeHidden},
 		{icon::update_icon.data(), icon::update_icon.size(), "UpdateIcon", &CAssetManager::m_pIconUpdate},
+		{icon::reset_icon.data(), icon::reset_icon.size(), "ResetIcon", &CAssetManager::m_pIconReset},
 		{icon::league_of_legends_icon.data(), icon::league_of_legends_icon.size(), "LeagueIcon",
 		 &CAssetManager::m_pIconLeagueOfLegends},
 		{icon::valorant_icon.data(), icon::valorant_icon.size(), "ValorantIcon", &CAssetManager::m_pIconValorant},

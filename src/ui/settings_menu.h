@@ -1,12 +1,17 @@
 #pragma once
 
 // The small rendered app menu anchored under the title bar's Menu button - a rounded
-// popup (grouped items, no footer) rather than a native TrackPopupMenu. Just Settings, Open
-// Data Folder, and Check for Updates - this is an account manager, not a file manager, so
-// there's no GoTo/Commands/Layouts row group to make room for. No Exit item - the title
-// bar's own close button already does that, so this menu doesn't need a second, redundant
-// way to quit. The app's own version number lives in the bottom status bar now (see
-// main.cpp's DrawStatusBarVersion), not a footer here.
+// popup rather than a native TrackPopupMenu. Two groups of items, split by a hairline:
+// Check for Updates on its own (a thing you do to this build), then Settings and Open Data
+// Folder (both about this install's configuration). No Exit item - the title bar's own
+// close button already does that, so this menu doesn't need a second, redundant way to
+// quit - and no version strip either: a number nobody can act on doesn't earn a permanent
+// line in a menu.
+//
+// The item list is a table (see settings_menu.cpp's kMenuItems), not a hand-written rect/
+// hover/draw trio per row: this menu grew from three items to four and every one of those
+// three had its own copy-pasted hover branch, which is exactly how a fifth ends up
+// subtly different from the rest. Adding an item now means adding one row to that table.
 //
 // While open (IsBlocking), every input event is swallowed regardless of kind or where it
 // lands - not just clicks - mirroring the original codebase's own blanket dismiss-on-any-
@@ -20,6 +25,7 @@
 #include "ui/widget.h"
 
 class CAssetManager;
+struct CSettings;
 
 enum class ESettingsMenuAction : std::uint8_t {
 	SETTINGS_MENU_ACTION_NONE,
@@ -36,24 +42,27 @@ enum class ESettingsMenuAction : std::uint8_t {
 
 class CSettingsMenu : public CWidget {
   public:
-	// assets supplies the Settings/Open Data Folder/Check for Updates rows' own left-aligned
-	// icons - the Settings gear specifically is the same icon the title bar's Menu button
-	// used to show itself (see title_bar.cpp); it moved here once that button started
-	// opening a menu, not Settings directly. appLocked is read-only here (a live reference
-	// into main()'s own local, the same reference-to-a-longer-lived-local pattern
-	// CUnlockScreen's own m_settings/m_masterKey already use) - purely to gray out and
-	// disable the Settings row while the vault is still locked (see Draw/OnPointerUp/
+	// assets supplies each row's own left-aligned icon - the Settings gear specifically is
+	// the same icon the title bar's Menu button used to show itself (see title_bar.cpp); it
+	// moved here once that button started opening a menu, not Settings directly. settings is
+	// read-only here, purely so the hover highlight and the header's accent bar follow the
+	// user's own accent color instead of a hardcoded purple. appLocked is read-only too (a
+	// live reference into main()'s own local, the same reference-to-a-longer-lived-local
+	// pattern CUnlockScreen's own m_settings/m_masterKey already use) - purely to gray out
+	// and disable the Settings row while the vault is still locked (see Draw/OnPointerUp/
 	// GetDesiredCursor): this menu itself is reachable on the master-password screen now
 	// (see main.cpp's own widget-stack push order), but actually opening CSettingsPanel
 	// still isn't, so a click there shouldn't silently do nothing without any visual hint
 	// why.
-	CSettingsMenu(CFontManager &fonts, CAssetManager &assets, const bool &appLocked);
+	CSettingsMenu(CFontManager &fonts, CAssetManager &assets, const CSettings &settings, const bool &appLocked);
 
 	void Open();
 	void Close();
 
 	// Eases m_flOpenAmount toward its target every frame regardless of whether the menu
-	// is open, so a closing menu keeps animating out instead of vanishing instantly.
+	// is open, so a closing menu keeps animating out instead of vanishing instantly, and
+	// eases each item's own hover amount so the highlight grows under the cursor rather
+	// than snapping between rows.
 	void Update(float deltaSeconds) override;
 	void Draw(CDrawList &drawList) override;
 
@@ -96,11 +105,27 @@ class CSettingsMenu : public CWidget {
 	// CTitleBar::ConsumeMenuClicked.
 	ESettingsMenuAction ConsumeAction();
 
+	// The cap on settings_menu.cpp's own item table - public only so that table's
+	// static_assert can check itself against it.
+	static constexpr std::uint64_t kMaxItems = 8;
+
   private:
+	// Whether the item at `index` in settings_menu.cpp's own table can actually be clicked
+	// right now - only ever false for Settings while the vault is locked, but expressed as
+	// a per-item question so the draw/click/cursor paths all ask it the same way.
+	bool IsItemEnabled(std::uint64_t index) const;
+
 	CFontManager &m_fonts;
 	CAssetManager &m_assets;
+	const CSettings &m_settings;
 	const bool &m_appLocked;
 	bool m_bOpen = false;
 	float m_flOpenAmount = 0.0f;
+
+	// Per-item hover fade, indexed the same as settings_menu.cpp's kMenuItems. Sized off
+	// the generous fixed cap above rather than that table's own length, which this header
+	// can't see - the static_assert next to the table keeps the two honest.
+	float m_aItemHoverAmount[kMaxItems]{};
+
 	ESettingsMenuAction m_pendingAction = ESettingsMenuAction::SETTINGS_MENU_ACTION_NONE;
 };

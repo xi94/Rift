@@ -766,24 +766,6 @@ bool CCarousel::OnPointerUp(float x, float y)
 	return true;
 }
 
-bool CCarousel::OnRightPointerUp(float x, float y)
-{
-	if (!m_bIsHovered) {
-		return false;
-	}
-	// A miss is still a meaningful "somewhere in the carousel" result here, not "nothing
-	// pending" - see PendingHit's own doc comment in core/types.h.
-	m_pendingRightClickBanner = PendingHitFromHitTest(HitTest(x, y));
-	return true;
-}
-
-PendingHit CCarousel::ConsumePendingRightClick()
-{
-	const PendingHit pending = m_pendingRightClickBanner;
-	m_pendingRightClickBanner = PendingHit{};
-	return pending;
-}
-
 PendingHit CCarousel::ConsumePendingClick()
 {
 	const PendingHit pending = m_pendingClickBanner;
@@ -1107,8 +1089,8 @@ void CCarousel::DrawListMode(CDrawList &drawList, std::uint8_t alpha, float yOff
 		}
 
 		const float textX = thumb.X + thumb.W + 16.0f;
-		DrawText(drawList, body, textX, rect.Y + (rect.H + body.GetAscent()) * 0.5f, banner.Title,
-				 ColorFadeAlpha(Color{232, 232, 236, 255}, alpha));
+		DrawText(drawList, body, textX, rect.Y + rect.H * 0.5f + (body.GetAscent() + body.GetDescent()) * 0.5f,
+				 banner.Title, ColorFadeAlpha(Color{232, 232, 236, 255}, alpha));
 	}
 	drawList.PopClipRect();
 
@@ -1239,7 +1221,7 @@ void CCarousel::DrawModeSwitcher(CDrawList &drawList) const
 		DrawModeGlyph(drawList, m_assets, mode, iconBox,
 					  ColorFadeAlpha(active ? kModeSwitcherTextActive : kModeSwitcherText, alpha));
 		DrawText(drawList, body, contentX + kModeSwitcherRowIconSize + kModeSwitcherRowIconGap,
-				 row.Y + (row.H + body.GetAscent()) * 0.5f, ViewModeName(mode),
+				 row.Y + row.H * 0.5f + (body.GetAscent() + body.GetDescent()) * 0.5f, ViewModeName(mode),
 				 ColorFadeAlpha(active ? kModeSwitcherTextActive : kModeSwitcherText, alpha));
 	}
 
@@ -1282,8 +1264,8 @@ void CCarousel::DrawModeSwitcher(CDrawList &drawList) const
 								  CDrawList::UniformRadii(indicator.H * 0.5f),
 								  ColorFadeAlpha(kModeSwitcherIndicatorFill, alpha));
 	DrawText(drawList, secondary, indicator.X + kModeSwitcherIndicatorPaddingX,
-			 indicator.Y + (indicator.H + secondary.GetAscent()) * 0.5f - 1.0f, percentText,
-			 ColorFadeAlpha(Color{20, 18, 26, 255}, alpha));
+			 indicator.Y + indicator.H * 0.5f + (secondary.GetAscent() + secondary.GetDescent()) * 0.5f - 1.0f,
+			 percentText, ColorFadeAlpha(Color{20, 18, 26, 255}, alpha));
 }
 
 void CCarousel::Draw(CDrawList &drawList)

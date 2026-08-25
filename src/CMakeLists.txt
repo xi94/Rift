@@ -42,6 +42,7 @@ add_executable (Rift
   "ui/settings_menu.cpp"
   "ui/context_menu.cpp"
   "ui/text_input.cpp"
+  "ui/tooltip.cpp"
   "ui/color_picker.cpp"
   "ui/game_select_popup.cpp"
   "ui/unlock_screen.cpp"

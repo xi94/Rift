@@ -28,15 +28,20 @@
 // CAccountModal::Update) or every hover check here silently never fires, since
 // CWidget::m_flMouseX/Y default to off-screen and nothing else would ever update them.
 //
-// Anchored to the right of the chip that opens it, top-aligned, rather than below/above -
-// a below-first-flip-above-if-no-room layout (this widget's original design) read as
-// "awkward" once the popup was tall enough to actually need the flip, a direct bug
-// report. Growing to the right instead of down/up means there's no flip decision to make
-// at all in the common case. m_flOpenAmount (eased 0 collapsed -> 1 fully open, same
-// CAnimator::EaseToward primitive as every other animated reveal in this project) grows
-// the popup's height from the top down - "folds out" - while PushClipRect(popup) (see
-// Draw) hides whatever rows the not-yet-grown box hasn't reached yet, the same
-// grow-and-clip technique CSettingsPanel's protection-tier foldout uses.
+// Hangs from the chip that opens it: directly below, and right-aligned to the chip's own
+// right edge so it grows leftward, over the form rather than away from it. That follows
+// the chip itself, which now lives in the top-right of the edit form's header (see
+// CAccountModal::VisibilityChipRect) - a menu should drop from the control that opened it,
+// and from a top-right anchor the only direction with room is down-and-left.
+//
+// There is deliberately no flip-above fallback: the anchor sits in the header, so "below"
+// always has the whole form beneath it to unfold into, and a popup that sometimes jumped
+// above its own chip was this widget's original design and a direct bug report.
+// m_flOpenAmount (eased 0 collapsed -> 1 fully open, same CAnimator::EaseToward primitive
+// as every other animated reveal in this project) grows the popup's height from the top
+// down - "folds out" - while PushClipRect(popup) (see Draw) hides whatever rows the
+// not-yet-grown box hasn't reached yet, the same grow-and-clip technique CSettingsPanel's
+// protection-tier foldout uses.
 
 #include <cstdint>
 

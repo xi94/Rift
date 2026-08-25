@@ -86,7 +86,7 @@ struct DrawCommand {
 	Rect ClipRect; // logical pixels; only meaningful when HasClip
 	std::uint32_t IndexOffset;
 	std::uint32_t IndexCount;
-	BannerGlowParams Glow;			  // only meaningful when Kind == DRAW_COMMAND_KIND_BANNER_GLOW
+	BannerGlowParams Glow;			 // only meaningful when Kind == DRAW_COMMAND_KIND_BANNER_GLOW
 	CircularProgressParams Progress; // only meaningful when Kind == DRAW_COMMAND_KIND_CIRCULAR_PROGRESS
 };
 
@@ -257,6 +257,15 @@ class CDrawList {
 	void AddRectTexturedUv(float x, float y, float w, float h, float u0, float v0, float u1, float v1,
 						   const CTexture *pTexture, Color tint);
 
+	// A textured quad rotated by `radians` about its own center - the one primitive here
+	// whose corners aren't axis-aligned. Exists for spinning an icon in place (the Settings
+	// panel's reset buttons spin a full turn as the value they restore animates back to its
+	// default); no rounding parameter, since a rotated rounded rect would need the corner
+	// fan rotated with it and nothing needs that. radians == 0 produces exactly the same
+	// four vertices AddRectRoundedTextured with kCornerRadiiNone would.
+	void AddRectTexturedRotated(float x, float y, float w, float h, float radians, const CTexture *pTexture,
+								Color tint);
+
 	static UvRect ComputeCoverUv(float boxW, float boxH, float textureW, float textureH);
 
   private:
@@ -285,7 +294,7 @@ class CDrawList {
 	const CTexture *m_pCurrentTexture = nullptr;
 	bool m_bCurrentHasClip = false;
 	Rect m_currentClipRect{};
-	BannerGlowParams m_currentGlow{};		 // in-progress command's glow params; see SetTarget in draw_list.cpp
+	BannerGlowParams m_currentGlow{};			// in-progress command's glow params; see SetTarget in draw_list.cpp
 	CircularProgressParams m_currentProgress{}; // in-progress command's ring params; see SetTarget in draw_list.cpp
 	std::uint32_t m_nCommandStartIndex = 0;
 	bool m_bHasOpenCommand = false;

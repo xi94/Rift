@@ -30,12 +30,11 @@
 // OnScroll for that one frame, the same "Win32 state OnScroll's signature can't carry"
 // situation, just resolved by a second explicit method rather than a redesigned signature.
 //
-// Right-click (OnRightPointerUp, CWidget's own new virtual - added here since this is the
-// first widget that needs it) can't open CContextMenu itself (CCarousel doesn't, and
-// shouldn't, know that class exists) - it hit-tests and latches the result for
-// ConsumePendingRightClick, the same one-shot-then-clears contract CTitleBar/CSettingsMenu
-// already use, so a coordinating owner can poll it once per frame and build/open the
-// actual menu.
+// Deliberately has no right-click behavior: everything its context menu used to offer
+// (Open, Login, Copy Password, Add Account) is already one plain left-click away, on the
+// card itself or inside the account list it opens, and a menu that only duplicates the
+// primary click is a second thing to maintain for no reach. Right-clicking a card falls
+// through to nothing in every view mode.
 
 #include <cstdint>
 
@@ -190,16 +189,7 @@ class CCarousel : public CWidget {
 	bool OnPointerDown(float x, float y) override;
 	bool OnPointerMove(float x, float y) override;
 	bool OnPointerUp(float x, float y) override;
-	bool OnRightPointerUp(float x, float y) override;
 	bool OnScroll(float x, float y, float wheelDelta) override;
-
-	// The banner a right-click just hit-tested: PENDING_HIT_KIND_MISS means the click
-	// landed on the carousel but not on any specific banner - a coordinating owner should
-	// treat that as "the currently selected/centered banner," matching the original's own
-	// "right-clicking empty carousel space offers Add Account for the centered banner"
-	// behavior - and PENDING_HIT_KIND_NONE means nothing pending. Cleared on read. Only
-	// meaningful the frame after OnRightPointerUp returned true.
-	PendingHit ConsumePendingRightClick();
 
 	// The banner a genuine left-click (not a drag, not a mode-switcher click, not the
 	// release that ends a scrollbar-thumb drag) just resolved to via OnPointerUp -
@@ -349,6 +339,5 @@ class CCarousel : public CWidget {
 	// incoming card can ease simultaneously instead of snapping).
 	float m_aGridHoverScale[kCarouselMaxBanners]{};
 
-	PendingHit m_pendingRightClickBanner;
 	PendingHit m_pendingClickBanner;
 };
