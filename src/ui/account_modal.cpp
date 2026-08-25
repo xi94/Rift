@@ -556,6 +556,24 @@ void CAccountModal::StartLoginFor(std::uint32_t bannerIndex, std::uint32_t query
 	m_login.Start(account.GetUsername(), StringViewFromCString(account.m_szPassword), viewedBanner.Title);
 }
 
+void CAccountModal::RequestLogin(std::int32_t bannerIndex, std::int32_t queryIndex)
+{
+	m_nSelectedAccountIndex = queryIndex;
+	m_mode = EAccountModalMode::ACCOUNT_MODAL_MODE_LOGIN_PROGRESS;
+	m_flLoginElapsedSeconds = 0.0f;
+
+	if (m_login.IsActive() && !CLoginAttempt::IsTerminalStage(m_login.GetStage())) {
+		m_login.Cancel();
+		m_nPendingLoginBannerIndex = bannerIndex;
+		m_nPendingLoginQueryIndex = queryIndex;
+		return;
+	}
+
+	m_nPendingLoginBannerIndex = -1;
+	m_nPendingLoginQueryIndex = -1;
+	StartLoginFor(static_cast<std::uint32_t>(bannerIndex), static_cast<std::uint32_t>(queryIndex));
+}
+
 // --- Public API ---
 
 void CAccountModal::Open(std::int32_t bannerIndex)
@@ -578,20 +596,11 @@ void CAccountModal::Close()
 
 void CAccountModal::OpenForQuickLogin(std::int32_t bannerIndex, std::int32_t accountIndex)
 {
+	// Deliberately doesn't show the window - the tray is for logging in without being
+	// interrupted. This still opens the modal, so restoring the window later lands straight on
+	// the progress view for whatever is running.
 	Open(bannerIndex);
-
-	// A previous attempt on this same CLoginAttempt might not have actually finished yet (see
-	// CLoginAttempt::Start's own comment) - fall back to the plain account list Open() already
-	// set up rather than showing a login progress view for an attempt that silently didn't
-	// start.
-	if (m_login.IsActive()) {
-		return;
-	}
-
-	m_nSelectedAccountIndex = accountIndex;
-	m_mode = EAccountModalMode::ACCOUNT_MODAL_MODE_LOGIN_PROGRESS;
-	m_flLoginElapsedSeconds = 0.0f;
-	StartLoginFor(static_cast<std::uint32_t>(bannerIndex), static_cast<std::uint32_t>(accountIndex));
+	RequestLogin(bannerIndex, accountIndex);
 }
 
 void CAccountModal::StartAddAccount()
@@ -716,6 +725,17 @@ void CAccountModal::Update(float deltaSeconds)
 	// Always, regardless of mode/visibility - CLoginAttempt::Update's join is always safe
 	// and effectively instantaneous once the worker reaches a terminal stage.
 	m_login.Update();
+
+	// IsActive goes false once that Update retires the worker, or once its cancel watchdog
+	// abandons a wedged one - so a queued request always starts eventually, bounded either way.
+	if (HasPendingLogin() && !m_login.IsActive()) {
+		const std::int32_t bannerIndex = m_nPendingLoginBannerIndex;
+		const std::int32_t queryIndex = m_nPendingLoginQueryIndex;
+		m_nPendingLoginBannerIndex = -1;
+		m_nPendingLoginQueryIndex = -1;
+		m_flLoginElapsedSeconds = 0.0f;
+		StartLoginFor(static_cast<std::uint32_t>(bannerIndex), static_cast<std::uint32_t>(queryIndex));
+	}
 }
 
 bool CAccountModal::OnPointerDown(float x, float y)
@@ -842,14 +862,8 @@ bool CAccountModal::OnPointerUp(float x, float y)
 			m_nSelectedAccountIndex = -1;
 		}
 
-		// !m_login.IsActive(): a previous attempt (most often one just Cancelled) might not
-		// have actually finished yet - see DrawFooter's own comment on why the Login button
-		// mirrors this same condition rather than just m_nSelectedAccountIndex.
-		if (m_nSelectedAccountIndex >= 0 && !m_login.IsActive() &&
-			RectContainsPoint(LoginButtonRect(layout.Footer), x, y)) {
-			m_mode = EAccountModalMode::ACCOUNT_MODAL_MODE_LOGIN_PROGRESS;
-			m_flLoginElapsedSeconds = 0.0f;
-			StartLoginFor(bannerIndex, static_cast<std::uint32_t>(m_nSelectedAccountIndex));
+		if (m_nSelectedAccountIndex >= 0 && RectContainsPoint(LoginButtonRect(layout.Footer), x, y)) {
+			RequestLogin(static_cast<std::int32_t>(bannerIndex), m_nSelectedAccountIndex);
 		}
 	} else if (m_mode == EAccountModalMode::ACCOUNT_MODAL_MODE_LOGIN_PROGRESS) {
 		// Cancel/Back share the Login button's rect. CLoginAttempt::Cancel is a real
@@ -858,6 +872,8 @@ bool CAccountModal::OnPointerUp(float x, float y)
 		// invisibly after the UI has already moved on. Safe to call even once the attempt has
 		// already reached a terminal stage (a no-op then, "Back" rather than a real cancel).
 		if (RectContainsPoint(LoginButtonRect(layout.Footer), x, y)) {
+			m_nPendingLoginBannerIndex = -1;
+			m_nPendingLoginQueryIndex = -1;
 			m_login.Cancel();
 			m_mode = EAccountModalMode::ACCOUNT_MODAL_MODE_ACCOUNT_LIST;
 		}
@@ -1336,15 +1352,18 @@ void CAccountModal::DrawAccountList(CDrawList &drawList, Rect right, std::uint8_
 void CAccountModal::DrawLoginProgress(CDrawList &drawList, Rect right, std::uint8_t alpha) const
 {
 	const ELoginStage stage = m_login.GetStage();
-	const bool terminal = CLoginAttempt::IsTerminalStage(stage);
+	// A queued restart is still in flight as far as the user is concerned - the attempt it
+	// cancelled must not flash its own terminal ring and message on the way through.
+	const bool pending = HasPendingLogin();
+	const bool terminal = !pending && CLoginAttempt::IsTerminalStage(stage);
 
 	const float cx = right.X + right.W * 0.5f;
 	const float cy = right.Y + right.H * 0.5f - 24.0f;
 
 	Color stageColor = m_settings.m_clrAccent;
-	if (stage == ELoginStage::LOGIN_STAGE_SUCCESS) {
+	if (terminal && stage == ELoginStage::LOGIN_STAGE_SUCCESS) {
 		stageColor = kColorSuccess;
-	} else if (stage == ELoginStage::LOGIN_STAGE_ERROR) {
+	} else if (terminal && stage == ELoginStage::LOGIN_STAGE_ERROR) {
 		stageColor = kColorError;
 	}
 
@@ -1383,7 +1402,7 @@ void CAccountModal::DrawLoginProgress(CDrawList &drawList, Rect right, std::uint
 	// one's actually available - GetTerminalMessage stays empty until then (and on a plain
 	// Success with nothing more specific to say), so LoginStageMessage's own fixed strings
 	// are still what's shown for every in-flight stage, and as the Success/Error fallback.
-	CStringView message = LoginStageMessage(stage);
+	CStringView message = pending ? StringViewFromCString("Switching account...") : LoginStageMessage(stage);
 	if (terminal) {
 		const CStringView terminalMessage = m_login.GetTerminalMessage();
 		if (terminalMessage.Length > 0) {
@@ -1545,7 +1564,7 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 							 ColorFadeAlpha(kColorTextBright, alpha));
 		}
 	} else if (m_mode == EAccountModalMode::ACCOUNT_MODAL_MODE_LOGIN_PROGRESS) {
-		const bool terminal = CLoginAttempt::IsTerminalStage(m_login.GetStage());
+		const bool terminal = !HasPendingLogin() && CLoginAttempt::IsTerminalStage(m_login.GetStage());
 		DrawText(drawList, secondary, footer.X + kRowPadding, footer.Y + (footer.H + secondary.GetAscent()) * 0.5f,
 				 terminal ? StringViewFromCString("") : StringViewFromCString("Logging in..."),
 				 ColorFadeAlpha(kColorTextFaint, alpha));
@@ -1567,12 +1586,9 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 		DrawText(drawList, secondary, footer.X + kRowPadding, footer.Y + (footer.H + secondary.GetAscent()) * 0.5f,
 				 StringViewFromCString("Select an account to log in"), ColorFadeAlpha(kColorTextFaint, alpha));
 
-		// Also disabled while a previous attempt on this same CLoginAttempt hasn't actually
-		// finished yet - e.g. right after a Cancel click, before the worker has noticed it (see
-		// CLoginAttempt::Start's own comment on why starting a new one before then would either
-		// silently no-op or, worse, block the whole app waiting to join a worker that might be
-		// stuck deep inside a single slow UI Automation call).
-		const bool loginEnabled = m_nSelectedAccountIndex >= 0 && !m_login.IsActive();
+		// Not gated on m_login.IsActive(): pressing Login during an attempt replaces it - see
+		// RequestLogin.
+		const bool loginEnabled = m_nSelectedAccountIndex >= 0;
 		const Rect loginButton = LoginButtonRect(footer);
 		const bool hoverLogin = loginEnabled && RectContainsPoint(loginButton, m_flMouseX, m_flMouseY);
 		const Color buttonColor =

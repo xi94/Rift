@@ -209,6 +209,21 @@ class CWindow {
 		m_bUpdateButtonVisible = visible;
 	}
 
+	// While true, a minimize (the title bar's own button, or the OS's) hides the window
+	// instead, leaving the tray icon as the only way back to it.
+	void SetMinimizeToTray(bool minimizeToTray)
+	{
+		m_bMinimizeToTray = minimizeToTray;
+	}
+
+	bool IsHidden() const
+	{
+		return IsWindowVisible(m_hWnd) == FALSE;
+	}
+
+	// Undoes a minimize-to-tray hide, or an ordinary minimize.
+	void Restore();
+
   private:
 	static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 	LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
@@ -224,6 +239,7 @@ class CWindow {
 
 	bool m_bShouldClose = false;
 	bool m_bUpdateButtonVisible = false; // see SetUpdateButtonVisible
+	bool m_bMinimizeToTray = false;		 // see SetMinimizeToTray
 
 	// SetCapture on WM_LBUTTONDOWN keeps WM_MOUSEMOVE/WM_LBUTTONUP routed to this window
 	// even once the cursor leaves the client area mid-drag - without it, dragging the

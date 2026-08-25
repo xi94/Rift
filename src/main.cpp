@@ -131,8 +131,8 @@ EStorageLoadResult LoadNow(CCarousel &carousel, CSettings &settings, const CMast
 	return LoadAccountsNow(carousel, settings, masterKey);
 }
 
-// Copies an account's password to the system clipboard as plain Unicode text - the
-// tray menu's and carousel context menu's "Copy Password" action.
+// Copies an account's password to the system clipboard as plain Unicode text - the carousel
+// context menu's "Copy Password" action.
 void CopyPasswordToClipboard(HWND owner, const char *pPassword)
 {
 	if (!OpenClipboard(owner)) {
@@ -158,27 +158,39 @@ void CopyPasswordToClipboard(HWND owner, const char *pPassword)
 	CloseClipboard();
 }
 
-// Called synchronously from inside CTray's context-menu handler (a right-click on the
-// icon) - see tray.h's TrayAccountListCallback type for why this has to be a callback
-// rather than something polled once per frame. Named distinctly from that type alias
-// (not TrayAccountListCallback) so the two don't collide as identifiers.
-std::uint32_t HandleTrayAccountListRequest(void *pUserData, TrayAccountItem *pOutItems, std::uint32_t capacity)
+// Called synchronously from inside CTray's context-menu handler (a right-click on the icon) -
+// see tray.h's TrayMenuCallback for why this has to be a callback rather than something
+// polled once per frame. Reads the live carousel, so every account edit is reflected the next
+// time the menu opens with nothing to invalidate.
+//
+// Every banner gets a row, including ones with no accounts, and each row's accounts come from
+// GetVisibleAccounts - not the banner's own raw storage - so an account flagged visible under
+// a second game appears under that game too, exactly as it does in the app itself.
+void BuildTrayMenu(void *pUserData, TrayMenuModel &outModel)
 {
 	const auto *pCarousel = static_cast<const CCarousel *>(pUserData);
 
-	std::uint32_t written = 0;
-	for (std::uint32_t b = 0; b < pCarousel->GetBannerCount() && written < capacity; b += 1) {
-		const CBanner &banner = pCarousel->GetBanner(b);
-		for (std::uint32_t a = 0; a < banner.AccountCount && written < capacity; a += 1) {
-			TrayAccountItem &item = pOutItems[written];
-			StringViewCopyToFixed(item.BannerTitle, sizeof(item.BannerTitle), banner.Title);
-			StringViewCopyToFixed(item.Username, sizeof(item.Username), banner.Accounts[a].GetUsername());
+	VisibleAccountRef refs[kCarouselMaxVisibleAccounts];
+	for (std::uint32_t b = 0; b < pCarousel->GetBannerCount() && outModel.GameCount < kTrayMaxGames; b += 1) {
+		const std::uint32_t visibleCount = pCarousel->GetVisibleAccounts(b, refs);
+
+		TrayGameItem &game = outModel.Games[outModel.GameCount];
+		outModel.GameCount += 1;
+		StringViewCopyToFixed(game.Title, sizeof(game.Title), pCarousel->GetBanner(b).Title);
+		game.BannerIndex = static_cast<std::int32_t>(b);
+		game.FirstAccount = outModel.AccountCount;
+		game.AccountCount = 0;
+
+		for (std::uint32_t q = 0; q < visibleCount && outModel.AccountCount < kTrayMaxAccountItems; q += 1) {
+			const CAccount &account = pCarousel->GetBanner(refs[q].BannerIndex).Accounts[refs[q].AccountIndex];
+			TrayAccountItem &item = outModel.Accounts[outModel.AccountCount];
+			StringViewCopyToFixed(item.Username, sizeof(item.Username), account.GetUsername());
 			item.BannerIndex = static_cast<std::int32_t>(b);
-			item.AccountIndex = static_cast<std::int32_t>(a);
-			written += 1;
+			item.QueryIndex = static_cast<std::int32_t>(q);
+			outModel.AccountCount += 1;
+			game.AccountCount += 1;
 		}
 	}
-	return written;
 }
 
 // Submits one already-Finish()'d CDrawList's batched commands to the renderer, one
@@ -407,9 +419,7 @@ int main(int argc, char *argv[])
 	}
 
 	CTray tray;
-	if (!tray.Create(L"Rift")) {
-		  std::println("Failed to create tray icon.");
-	}
+	tray.Create(L"Rift");
 
 	CDrawList drawList;
 	drawList.Init(persistentArena, kDrawListVertexCapacity, kDrawListIndexCapacity);
@@ -426,25 +436,50 @@ int main(int argc, char *argv[])
 	auto pCarouselOwned = std::make_unique<CCarousel>(fonts, assets);
 	CCarousel *pCarousel = pCarouselOwned.get();
 
-	// Demo accounts until real persistence overwrites them below - fixed per-title brand
-	// colors, not user-customizable (the global Accent Color setting only ever reaches
-	// genuinely global chrome, never a specific game's own identity).
-	pCarousel->AddBanner(StringViewFromCString("League of Legends"), assets.GetBannerLeagueOfLegends(),
-						 assets.GetIconLeagueOfLegends(), Color{210, 175, 55, 255}); // golden yellow
-	pCarousel->AddBanner(StringViewFromCString("Teamfight Tactics"), assets.GetBannerTeamfightTactics(),
-						 assets.GetIconTeamfightTactics(), Color{70, 140, 190, 255}); // teal-blue
-	pCarousel->AddBanner(StringViewFromCString("Valorant"), assets.GetBannerValorant(), assets.GetIconValorant(),
-						 Color{210, 55, 60, 255}); // red
-	pCarousel->AddBanner(StringViewFromCString("2XKO"), assets.GetBannerTwoXko(), assets.GetIconTwoXko(),
-						 Color{45, 205, 210, 255}); // cyan
-	pCarousel->AddBanner(StringViewFromCString("Legends of Runeterra"), assets.GetBannerRuneterra(),
-						 assets.GetIconRuneterra(), Color{140, 90, 200, 255}); // purple
+	// The one place a game is declared. Everything a game needs - its title, its carousel
+	// art, its icon, its brand color, and the bytes the tray menu decodes its own icon from -
+	// lives on one row, and the loop below is what assigns banner indices, so adding a game
+	// means adding exactly one row here and nothing else. Anything that needs a banner index
+	// and a per-game asset to line up must be driven from this table rather than repeated as
+	// a second list in the same order: two lists that only a comment keeps in sync is exactly
+	// how the tray ends up drawing Valorant's icon next to 2XKO's name.
+	//
+	// Brand colors are fixed per title, not user-customizable - the global Accent Color
+	// setting only ever reaches genuinely global chrome, never a specific game's own identity.
+	const struct {
+		const char *pTitle;
+		CTexture *pBanner;
+		CTexture *pIcon;
+		Color Accent;
+		EmbeddedImageBytes TrayIconBytes;
+	} games[]{
+		{"League of Legends", assets.GetBannerLeagueOfLegends(), assets.GetIconLeagueOfLegends(),
+		 Color{210, 175, 55, 255}, CAssetManager::IconBytesLeagueOfLegends()}, // golden yellow
+		{"Teamfight Tactics", assets.GetBannerTeamfightTactics(), assets.GetIconTeamfightTactics(),
+		 Color{70, 140, 190, 255}, CAssetManager::IconBytesTeamfightTactics()}, // teal-blue
+		{"Valorant", assets.GetBannerValorant(), assets.GetIconValorant(), Color{210, 55, 60, 255},
+		 CAssetManager::IconBytesValorant()}, // red
+		{"2XKO", assets.GetBannerTwoXko(), assets.GetIconTwoXko(), Color{45, 205, 210, 255},
+		 CAssetManager::IconBytesTwoXko()}, // cyan
+		{"Legends of Runeterra", assets.GetBannerRuneterra(), assets.GetIconRuneterra(), Color{140, 90, 200, 255},
+		 CAssetManager::IconBytesRuneterra()}, // purple
+	};
+	static_assert(ARRAYSIZE(games) <= kCarouselMaxBanners, "more games than the carousel can hold");
+	static_assert(kTrayMaxGames >= kCarouselMaxBanners, "the tray would silently drop games the carousel accepts");
+
+	for (std::int32_t i = 0; i < static_cast<std::int32_t>(ARRAYSIZE(games)); i += 1) {
+		// AddBanner appends, so this iteration's banner index is i - the same index the tray
+		// stores its icon under, which is the whole point of doing both from one loop.
+		pCarousel->AddBanner(StringViewFromCString(games[i].pTitle), games[i].pBanner, games[i].pIcon,
+							 games[i].Accent);
+		tray.SetGameIcon(i, games[i].TrayIconBytes.pBytes, games[i].TrayIconBytes.Length);
+	}
 
 	// pCarousel's address is stable for the rest of main's scope (the stack owns it, and
 	// nothing removes it before shutdown); the callback itself only runs later,
 	// synchronously from a right-click, by which point LoadNow below has already updated
 	// the account lists it reads.
-	tray.SetAccountListCallback(HandleTrayAccountListRequest, pCarousel);
+	tray.SetMenuCallback(BuildTrayMenu, pCarousel);
 
 	CSettings settings;
 	CMasterKey masterKey;
@@ -568,28 +603,31 @@ int main(int argc, char *argv[])
 	while (!window.ShouldClose()) {
 		window.PumpMessages();
 
+		window.SetMinimizeToTray(settings.m_bMinimizeToTray && tray.IsIconVisible());
+		tray.SetAccentColor(settings.m_clrAccent);
+
 		const ETrayEventType trayEvent = tray.TakeEvent();
 		if (trayEvent == ETrayEventType::TRAY_EVENT_EXIT_REQUESTED) {
 			PostMessageW(window.GetHandle(), WM_CLOSE, 0, 0);
 		} else if (trayEvent == ETrayEventType::TRAY_EVENT_SHOW_WINDOW) {
-			ShowWindow(window.GetHandle(), SW_RESTORE);
-			SetForegroundWindow(window.GetHandle());
-		} else if (trayEvent == ETrayEventType::TRAY_EVENT_QUICK_LOGIN ||
-				   trayEvent == ETrayEventType::TRAY_EVENT_COPY_PASSWORD) {
+			window.Restore();
+		} else if (trayEvent == ETrayEventType::TRAY_EVENT_QUICK_LOGIN) {
 			const std::int32_t bannerIndex = tray.GetPendingBannerIndex();
-			const std::int32_t accountIndex = tray.GetPendingAccountIndex();
-			const bool valid = bannerIndex >= 0 &&
-							   static_cast<std::uint32_t>(bannerIndex) < pCarousel->GetBannerCount() &&
-							   accountIndex >= 0 &&
-							   static_cast<std::uint32_t>(accountIndex) <
-								   pCarousel->GetBanner(static_cast<std::uint32_t>(bannerIndex)).AccountCount;
-			if (valid && trayEvent == ETrayEventType::TRAY_EVENT_QUICK_LOGIN) {
-				ShowWindow(window.GetHandle(), SW_RESTORE);
-				SetForegroundWindow(window.GetHandle());
-				pModal->OpenForQuickLogin(bannerIndex, accountIndex);
-			} else if (valid) {
-				const CBanner &banner = pCarousel->GetBanner(static_cast<std::uint32_t>(bannerIndex));
-				CopyPasswordToClipboard(window.GetHandle(), banner.Accounts[accountIndex].m_szPassword);
+			const std::int32_t queryIndex = tray.GetPendingAccountIndex();
+			// queryIndex indexes the banner's visible-account query, not its raw storage -
+			// see TrayAccountItem. Re-run the query here rather than trusting the index the
+			// menu was built from: the account list can have changed while the menu was open.
+			bool valid = bannerIndex >= 0 && static_cast<std::uint32_t>(bannerIndex) < pCarousel->GetBannerCount() &&
+						 queryIndex >= 0;
+			if (valid) {
+				VisibleAccountRef refs[kCarouselMaxVisibleAccounts];
+				valid = static_cast<std::uint32_t>(queryIndex) <
+						pCarousel->GetVisibleAccounts(static_cast<std::uint32_t>(bannerIndex), refs);
+			}
+			if (valid) {
+				// No window.Restore() - a tray login deliberately stays out of the way. The
+				// modal still opens behind the scenes, so restoring later shows its progress.
+				pModal->OpenForQuickLogin(bannerIndex, queryIndex);
 			}
 		}
 
@@ -915,7 +953,13 @@ int main(int argc, char *argv[])
 		// gets submitted below.
 		renderer.SetEffectTime(timeSeconds);
 
-		RenderFrame(renderContext);
+		// Hidden in the tray: nothing to present, so don't - but keep pumping messages and
+		// running everything above, since a tray quick-login has to work while hidden.
+		if (window.IsHidden()) {
+			Sleep(16);
+		} else {
+			RenderFrame(renderContext);
+		}
 
 		// Last thing in the frame, so it only ticks once a frame has actually been presented -
 		// the watchdog reads this to tell "the whole app is frozen" apart from "a login worker

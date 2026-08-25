@@ -68,11 +68,12 @@ class CAccountModal : public CWidget {
 	// to draw itself with while it fades out.
 	void Close();
 
-	// Opens the modal pre-selected to one account and immediately starts a login
-	// attempt - the same sequence clicking a row then the Login button triggers,
-	// collapsed into one call. Used by the tray's quick-access menu so a right-click
-	// quick-login lands straight on the progress view instead of requiring the modal
-	// plus a click.
+	// Opens the modal pre-selected to one account and immediately starts a login attempt -
+	// the same sequence clicking a row then the Login button triggers, collapsed into one
+	// call. Used by the tray's quick-access menu, which deliberately does NOT show the main
+	// window: this only opens the modal, so a login started from the tray runs uninterrupted
+	// and restoring the window afterwards lands straight on its progress view. Replaces an
+	// attempt that's already running - see RequestLogin.
 	void OpenForQuickLogin(std::int32_t bannerIndex, std::int32_t accountIndex);
 
 	// Switches to EDIT_ACCOUNT with all three fields blank, ready to fill in a brand new
@@ -205,6 +206,20 @@ class CAccountModal : public CWidget {
 	// A no-op (m_login never starts) if queryIndex doesn't resolve to a real account.
 	void StartLoginFor(std::uint32_t bannerIndex, std::uint32_t queryIndex);
 
+	// The one entry point for "log this account in now", used by the row's Login button and
+	// the tray's quick-login alike. Starts immediately when nothing is in flight; otherwise
+	// cancels whatever is running and queues this request for Update to start once the old
+	// worker actually lets go - CLoginAttempt refuses to start over a live attempt, and
+	// joining one here could park the render thread on a wedged UI Automation call.
+	void RequestLogin(std::int32_t bannerIndex, std::int32_t queryIndex);
+
+	// True while a queued request is waiting for the attempt it cancelled. The progress view
+	// reads this so the outgoing attempt's terminal state doesn't flash on the way through.
+	bool HasPendingLogin() const
+	{
+		return m_nPendingLoginBannerIndex >= 0;
+	}
+
 	// --- Draw sections ---
 	void DrawAccountList(CDrawList &drawList, Rect right, std::uint8_t alpha) const;
 	void DrawAccountRow(CDrawList &drawList, Rect right, Rect row, const CAccount &account, bool isSelected,
@@ -234,6 +249,10 @@ class CAccountModal : public CWidget {
 
 	EAccountModalMode m_mode = EAccountModalMode::ACCOUNT_MODAL_MODE_ACCOUNT_LIST;
 	CLoginAttempt m_login;
+
+	// A login requested while another was still running - see RequestLogin. -1 = none.
+	std::int32_t m_nPendingLoginBannerIndex = -1;
+	std::int32_t m_nPendingLoginQueryIndex = -1;
 	float m_flLoginElapsedSeconds = 0.0f; // drives the in-progress indicator's pulse animation
 
 	// EDIT_ACCOUNT's form fields. Only one is focused at a time - same "explicit,

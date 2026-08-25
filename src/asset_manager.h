@@ -5,14 +5,29 @@
 // the embed headers directly - everything downstream just holds a CTexture* handed back
 // from here, owned for the process lifetime by this class.
 
+#include <cstdint>
 #include <memory>
 
 #include "gfx/texture.h"
 
 class IRenderer;
 
+// The undecoded bytes of an embedded image, for a consumer that needs its own decode rather
+// than the GPU texture - core/../tray.cpp builds GDI bitmaps for the tray menu from these.
+struct EmbeddedImageBytes {
+	const std::uint8_t *pBytes;
+	std::uint64_t Length;
+};
+
 class CAssetManager {
   public:
+	// Per-game icon source bytes, in the same order main() adds the banners.
+	static EmbeddedImageBytes IconBytesLeagueOfLegends();
+	static EmbeddedImageBytes IconBytesTeamfightTactics();
+	static EmbeddedImageBytes IconBytesValorant();
+	static EmbeddedImageBytes IconBytesTwoXko();
+	static EmbeddedImageBytes IconBytesRuneterra();
+
 	// Requires renderer to already be initialized. Returns false (having logged which
 	// asset failed) if any texture fails to decode/upload - a missing/corrupt embed is a
 	// build-time asset problem, not something to silently render blank for.

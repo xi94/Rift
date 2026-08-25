@@ -220,6 +220,15 @@ void CWindow::Show()
 	ShowWindow(m_hWnd, SW_SHOW);
 }
 
+void CWindow::Restore()
+{
+	ShowWindow(m_hWnd, SW_SHOW);
+	if (IsIconic(m_hWnd)) {
+		ShowWindow(m_hWnd, SW_RESTORE);
+	}
+	SetForegroundWindow(m_hWnd);
+}
+
 void CWindow::SetResizeCallback(ResizeCallback callback, void *pUserData)
 {
 	m_pResizeCallback = callback;
@@ -417,6 +426,10 @@ LRESULT CWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 		}
 
 		case WM_SIZE: {
+			if (wParam == SIZE_MINIMIZED && m_bMinimizeToTray) {
+				ShowWindow(m_hWnd, SW_HIDE);
+				return 0;
+			}
 			m_nPhysicalWidth = LOWORD(lParam);
 			m_nPhysicalHeight = HIWORD(lParam);
 			m_nWidth =

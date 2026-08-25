@@ -1,50 +1,70 @@
 #pragma once
 
-// A tray icon backed by a hidden message-only window. Runs on the same thread as
-// CWindow; CWindow::PumpMessages already dispatches messages for every window on this
-// thread (PeekMessageW with a null hwnd filter), so CTray needs no pump of its own -
-// main.cpp just calls TakeEvent after pumping to see what happened.
+// A tray icon backed by a hidden message-only window, sharing CWindow's thread and message
+// pump - main.cpp just calls TakeEvent after pumping to see what happened.
 //
-// The context menu is a quick-access account list: Open Rift, then one submenu
-// per game with accounts, each holding a Login / Copy Password pair per account - not
-// just Open/Exit.
+// The context menu is owner-drawn to match the app's own palette, and is laid out as:
+// every game, each with its icon and a submenu of the accounts visible under it, then a
+// separator, then Show Application / Exit Application. It is rebuilt from the live carousel
+// every time it opens, so account edits show up immediately with nothing to invalidate.
 
 #include <cstdint>
 
 #include <Windows.h>
 
+#include "core/types.h"
+
 enum class ETrayEventType : std::uint8_t {
 	TRAY_EVENT_NONE,
 	TRAY_EVENT_SHOW_WINDOW,
 	TRAY_EVENT_EXIT_REQUESTED,
-	TRAY_EVENT_QUICK_LOGIN,	  // GetPendingBannerIndex/GetPendingAccountIndex identify the account
-	TRAY_EVENT_COPY_PASSWORD, // same
+	TRAY_EVENT_QUICK_LOGIN, // GetPendingBannerIndex/GetPendingAccountIndex identify the account
 };
 
-// One row the tray menu can offer for quick login/copy. CTray only needs enough to label
-// the menu (title, username) - the account's actual password is resolved by the caller
-// (main.cpp, against the live CCarousel) once TRAY_EVENT_COPY_PASSWORD comes back, so it
-// never has to pass through this class.
+constexpr std::uint32_t kTrayMaxGames = 16;
+constexpr std::uint32_t kTrayMaxAccountItems = 256;
+
+struct TrayGameItem {
+	char Title[64];
+	std::int32_t BannerIndex;
+	std::uint32_t FirstAccount; // index into TrayMenuModel::Accounts
+	std::uint32_t AccountCount;
+};
+
+// BannerIndex is the game this row is listed under, and QueryIndex is its position within
+// that banner's own CCarousel::GetVisibleAccounts result - not the owning banner and raw
+// account index. That pairing is what CAccountModal::OpenForQuickLogin expects, and it is
+// what makes a cross-visible account log into the game the user actually picked it under.
 struct TrayAccountItem {
-	char BannerTitle[64];
 	char Username[64];
 	std::int32_t BannerIndex;
-	std::int32_t AccountIndex;
+	std::int32_t QueryIndex;
 };
 
-constexpr std::uint32_t kTrayMaxAccountItems = 64;
+struct TrayMenuModel {
+	TrayGameItem Games[kTrayMaxGames];
+	std::uint32_t GameCount;
+	TrayAccountItem Accounts[kTrayMaxAccountItems];
+	std::uint32_t AccountCount;
+};
 
-// Supplies the current account list for the tray's quick-access menu. Writes up to
-// capacity items into pOutItems and returns how many were written.
-//
-// Invoked synchronously from inside CTray's context-menu handler (a right-click on the
-// icon), the same "Win32 leaves no alternative" situation window.h documents for
-// ResizeCallback: TrackPopupMenu blocks the thread the frame loop runs on for as long as
-// the menu is open, so - unlike every other cross-module handoff in this project - this
-// can't be polled once per frame from main.cpp's loop. It's read-only (just building menu
-// labels), so it doesn't compromise the "state changes are polled, not pushed via
-// callback" rule the way a callback that mutated state would.
-using TrayAccountListCallback = std::uint32_t (*)(void *pUserData, TrayAccountItem *pOutItems, std::uint32_t capacity);
+// Fills the model for one menu open. Called synchronously from inside the context-menu
+// handler, because TrackPopupMenu blocks the frame loop's thread for as long as the menu is
+// open and nothing polled once per frame could answer in time. Read-only.
+using TrayMenuCallback = void (*)(void *pUserData, TrayMenuModel &outModel);
+
+// One owner-drawn row. Lives in CTray for the duration of one TrackPopupMenu call; the
+// pointer is what AppendMenuW carries as the item's data.
+struct TrayMenuEntry {
+	wchar_t szLabel[96];
+	HBITMAP hIcon;
+	bool bIndent;
+	bool bSeparator;
+	bool bSubmenu;
+	bool bDisabled;
+};
+
+constexpr std::uint32_t kTrayMaxMenuEntries = kTrayMaxAccountItems + kTrayMaxGames + 8;
 
 class CTray {
   public:
@@ -53,21 +73,27 @@ class CTray {
 	CTray(const CTray &) = delete;
 	CTray &operator=(const CTray &) = delete;
 
-	// Creates the hidden message-only window and adds the tray icon. Must run after the
-	// main CWindow exists - the message-only window rides the same thread's message pump.
+	// Creates the message-only window and adds the icon. Returns false only if the window
+	// itself couldn't be created - a failed Shell_NotifyIcon is retried on a timer and again
+	// whenever Explorer restarts, so it is not treated as fatal here.
 	bool Create(const wchar_t *pTooltip);
 
-	// Registers the one listener the context-menu handler calls synchronously to build
-	// the quick-access submenu - see TrayAccountListCallback's own doc comment for why
-	// this has to be a callback at all.
-	void SetAccountListCallback(TrayAccountListCallback callback, void *pUserData);
+	void SetMenuCallback(TrayMenuCallback callback, void *pUserData);
 
-	// Reads and clears the event produced by the last tray interaction (icon click or
-	// context menu choice), or TRAY_EVENT_NONE if nothing happened.
+	// Decodes an embedded PNG into the menu's icon column for one banner. Safe to skip; a
+	// game without one just draws no icon.
+	void SetGameIcon(std::int32_t bannerIndex, const std::uint8_t *pPngBytes, std::uint64_t length);
+
+	// Drives the menu's hover highlight. Call whenever the accent may have changed.
+	void SetAccentColor(Color accent);
+
+	bool IsIconVisible() const
+	{
+		return m_bIconAdded;
+	}
+
 	ETrayEventType TakeEvent();
 
-	// Valid alongside TRAY_EVENT_QUICK_LOGIN / TRAY_EVENT_COPY_PASSWORD - read these
-	// right after a TakeEvent() call that returned one of those two.
 	std::int32_t GetPendingBannerIndex() const
 	{
 		return m_nPendingBannerIndex;
@@ -80,14 +106,37 @@ class CTray {
   private:
 	static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 	LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
+
+	bool AddIcon();
+	void RemoveIcon();
 	void ShowContextMenu();
+	TrayMenuEntry *PushEntry(const wchar_t *pLabel, HBITMAP hIcon, bool bIndent, bool bSubmenu, bool bSeparator,
+							 bool bDisabled);
+	void RebuildBrushes();
+
+	void OnMeasureItem(MEASUREITEMSTRUCT *pMeasure) const;
+	void OnDrawItem(const DRAWITEMSTRUCT *pDraw) const;
 
 	HWND m_hWnd = nullptr;
 	HICON m_hIcon = nullptr;
+	bool m_bIconAdded = false;
+	std::uint32_t m_addAttempts = 0;
+	wchar_t m_szTooltip[128]{};
+
+	HFONT m_hMenuFont = nullptr;
+	HBRUSH m_hBackBrush = nullptr;
+	HBRUSH m_hHoverBrush = nullptr;
+	Color m_accent{108, 90, 220, 255};
+	HBITMAP m_gameIcons[kTrayMaxGames]{};
+
 	ETrayEventType m_pendingEvent = ETrayEventType::TRAY_EVENT_NONE;
 	std::int32_t m_nPendingBannerIndex = -1;
 	std::int32_t m_nPendingAccountIndex = -1;
 
-	TrayAccountListCallback m_pAccountListCallback = nullptr;
-	void *m_pAccountListCallbackUserData = nullptr;
+	TrayMenuModel m_model{};
+	TrayMenuEntry m_entries[kTrayMaxMenuEntries]{};
+	std::uint32_t m_entryCount = 0;
+
+	TrayMenuCallback m_pMenuCallback = nullptr;
+	void *m_pMenuCallbackUserData = nullptr;
 };

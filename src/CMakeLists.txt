@@ -101,7 +101,7 @@ target_link_libraries(Rift PRIVATE "${SODIUM_LIB_DIR}/libsodium.lib")
 # manifest fetch and exe download, chosen over pulling in libcurl since it's already part of
 # every Windows install, validates TLS certificates by default, and honors the system proxy
 # configuration out of the box.
-target_link_libraries(Rift PRIVATE shell32 dwmapi UIAutomationCore ole32 oleaut32 dbghelp comctl32 winhttp)
+target_link_libraries(Rift PRIVATE shell32 dwmapi UIAutomationCore ole32 oleaut32 dbghelp comctl32 winhttp msimg32)
 
 # core/login_attempt.cpp uses std::thread.
 find_package(Threads REQUIRED)

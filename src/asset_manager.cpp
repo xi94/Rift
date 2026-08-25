@@ -97,6 +97,31 @@ struct AssetEntry {
 };
 } // namespace
 
+EmbeddedImageBytes CAssetManager::IconBytesLeagueOfLegends()
+{
+	return {kestrel::embed::icon::league_of_legends_icon.data(), kestrel::embed::icon::league_of_legends_icon.size()};
+}
+
+EmbeddedImageBytes CAssetManager::IconBytesTeamfightTactics()
+{
+	return {kestrel::embed::icon::teamfight_tactics_icon.data(), kestrel::embed::icon::teamfight_tactics_icon.size()};
+}
+
+EmbeddedImageBytes CAssetManager::IconBytesValorant()
+{
+	return {kestrel::embed::icon::valorant_icon.data(), kestrel::embed::icon::valorant_icon.size()};
+}
+
+EmbeddedImageBytes CAssetManager::IconBytesTwoXko()
+{
+	return {kestrel::embed::icon::two_xko_icon.data(), kestrel::embed::icon::two_xko_icon.size()};
+}
+
+EmbeddedImageBytes CAssetManager::IconBytesRuneterra()
+{
+	return {kestrel::embed::icon::runeterra_icon.data(), kestrel::embed::icon::runeterra_icon.size()};
+}
+
 bool CAssetManager::Load(IRenderer &renderer)
 {
 	using namespace kestrel::embed;

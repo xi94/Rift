@@ -42,6 +42,10 @@ struct CSettings {
 	// they realize it exists.
 	bool m_bExcludeAccountListFromCapture = true;
 
+	// Minimizing hides the window to the tray icon instead of the taskbar. On by default -
+	// the tray menu's quick login is the point of having a tray icon at all.
+	bool m_bMinimizeToTray = true;
+
 	// The master-password KEK/DEK params CMasterKey::Set produced (see its own file
 	// comment) - not secret on their own (nobody recovers the DEK from these without the
 	// password), persisted so a later session's CMasterKey::Unlock can be re-supplied

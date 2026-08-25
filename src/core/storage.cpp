@@ -181,6 +181,7 @@ bool CStorage::SaveSettings(const CSettings &settings, std::int32_t carouselZoom
 						 settings.m_clrAccent.A};
 	j["font_name"] = std::string(settings.m_szFontName);
 	j["exclude_account_list_from_capture"] = settings.m_bExcludeAccountListFromCapture;
+	j["minimize_to_tray"] = settings.m_bMinimizeToTray;
 	j["carousel_zoom_stop"] = carouselZoomStop;
 	j["carousel_selected_banner"] = carouselSelectedBanner;
 
@@ -242,6 +243,7 @@ EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &out
 
 	settings.m_bExcludeAccountListFromCapture =
 		j.value("exclude_account_list_from_capture", settings.m_bExcludeAccountListFromCapture);
+	settings.m_bMinimizeToTray = j.value("minimize_to_tray", settings.m_bMinimizeToTray);
 	outCarouselZoomStop = j.value("carousel_zoom_stop", outCarouselZoomStop);
 	outCarouselSelectedBanner = j.value("carousel_selected_banner", outCarouselSelectedBanner);
 
