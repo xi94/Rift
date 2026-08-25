@@ -60,6 +60,7 @@
 // done, not close it out from under them afterward.
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <string>
 
@@ -277,6 +278,13 @@ class CRiotClient {
 	// fresh from the current HWND, never cached, for the same reason FindClientWindow itself
 	// is never cached - see this file's own header comment.
 	CUiElement CurrentWindowElement(const CUiAutomation &uiAutomation) const;
+
+	// CurrentWindowElement's one-entry cache, keyed on the HWND it was resolved from and given a
+	// short expiry - see that method's own comment. Mutable because it is a cache, not state:
+	// every method here that touches it is const and stays const.
+	mutable HWND m_cachedWindowHandle = nullptr;
+	mutable CUiElement m_cachedWindowElement;
+	mutable std::chrono::steady_clock::time_point m_cachedWindowExpiry{};
 
 	std::wstring m_executablePath;
 	HANDLE m_hProcess = nullptr;

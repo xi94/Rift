@@ -541,7 +541,32 @@ CUiElement CRiotClient::CurrentWindowElement(const CUiAutomation &uiAutomation) 
 	if (hWnd == nullptr) {
 		return CUiElement{};
 	}
-	return uiAutomation.ElementFromWindow(hWnd);
+
+	// Cached, because every poll loop below calls this on every 100ms iteration and
+	// ElementFromWindow is the expensive, cross-process half of it - a ten-second form wait was
+	// making a hundred of these calls where one would do, and each one is another roll of the
+	// dice on the provider wedging (a captured log has one of them stuck for 39 seconds, on the
+	// fiftieth-odd iteration rather than the first).
+	//
+	// Two things invalidate it, and both matter. The HWND, because a splash window being
+	// replaced by the real login window is a different handle - that is the case SubmitLogin's
+	// own comment insists on re-resolving, and keying on the handle re-resolves it exactly as if
+	// there were no cache. And a short expiry, because the same HWND can outlive the
+	// accessibility tree underneath it: a Chromium provider rebuilding its tree is what wedged
+	// the call this cache exists to avoid, and it is not worth assuming an element handed out
+	// before that rebuild still means anything after it. Two seconds keeps ~20 polls per lookup
+	// while bounding how stale a cached root can ever be.
+	const auto now = std::chrono::steady_clock::now();
+	if (hWnd == m_cachedWindowHandle && m_cachedWindowElement.IsValid() && now < m_cachedWindowExpiry) {
+		return m_cachedWindowElement;
+	}
+
+	constexpr auto kWindowElementCacheLifetime = std::chrono::milliseconds(2000);
+	CUiElement element = uiAutomation.ElementFromWindow(hWnd);
+	m_cachedWindowHandle = element.IsValid() ? hWnd : nullptr;
+	m_cachedWindowElement = element;
+	m_cachedWindowExpiry = now + kWindowElementCacheLifetime;
+	return element;
 }
 
 HWND CRiotClient::WaitForResponsiveClientWindow(std::uint32_t timeoutMs,
@@ -647,7 +672,8 @@ bool CRiotClient::SubmitLogin(const CUiAutomation &uiAutomation, CStringView use
 			}
 		}
 		polls += 1;
-		if (IsCancelled(pCancelRequested) || std::chrono::steady_clock::now() >= deadline) {
+		if (IsCancelled(pCancelRequested) || uiAutomation.HasWedged() ||
+			std::chrono::steady_clock::now() >= deadline) {
 			// Which of the three it was matters: no window at all is a launch/kill problem, a
 			// window without the fields is usually an already-logged-in client (the homepage
 			// has no login form) or a UI Automation tree that never came up.
@@ -716,6 +742,14 @@ bool CRiotClient::WaitForLoginError(const CUiAutomation &uiAutomation, std::wstr
 		}
 		if (!tooltipPresent) {
 			sawTooltipAbsent = true;
+		}
+		if (uiAutomation.HasWedged()) {
+			// Every lookup is failing instantly now, so "no error element found" has stopped
+			// meaning anything - see CUiAutomation::HasWedged. Bail out rather than spin out
+			// the rest of the timeout on answers that aren't answers; the caller checks
+			// HasWedged itself before inferring success from this returning false.
+			DebugLog::Write(kLogCategory, "abandoning the login-result wait - UI Automation has given up on the client");
+			return false;
 		}
 		if (IsCancelled(pCancelRequested) || std::chrono::steady_clock::now() >= deadline) {
 			// No error inside the window is what this project reads as success (see this

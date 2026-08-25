@@ -20,6 +20,15 @@
 // thread Init() was called on for that instance, never shared across threads - construct a
 // fresh instance per thread rather than trying to reuse one.
 //
+// Every cross-process lookup here (ElementFromWindow and the FindFirstDescendant* family) runs
+// on a throwaway thread and is abandoned if it doesn't come back in time - see kUiaCallTimeout
+// in the .cpp. That is not defensive tidiness: these are uncancellable COM calls into another
+// process's accessibility provider, and a Chromium/Electron one rebuilding its accessibility
+// tree has been observed, in a real log, to sit inside a single ElementFromHandle for well over
+// thirty seconds while the login worker could do nothing but wait. A lookup that gets abandoned
+// simply returns "not found", which every caller already handles; HasWedged() is what
+// distinguishes that from a genuine miss.
+//
 // Every wait/find here is a poll, not an instant lookup - a freshly-launched process's window,
 // and the controls inside it, often don't exist yet for the first several hundred milliseconds,
 // so "not found yet" and "never going to exist" are different outcomes a single lookup can't
@@ -113,6 +122,21 @@ class CUiAutomation {
 	// if Init() was never called or already failed.
 	void Shutdown();
 
+	// True once this instance has given up on the target: too many of its lookups had to be
+	// abandoned mid-flight (see kMaxAbandonedCalls in the .cpp), which means the target's
+	// accessibility provider has stopped answering and every later lookup on this instance now
+	// fails fast rather than stranding another thread on it.
+	//
+	// Any caller that reads "found nothing" as a meaningful answer MUST check this first.
+	// CRiotClient::WaitForLoginError is the one that really matters: its whole result is the
+	// inference "no error element appeared within the timeout, so the login went through", and
+	// a wedged provider produces exactly that same absence - so without this check, a client
+	// that stopped answering gets reported to the user as a successful login.
+	bool HasWedged() const
+	{
+		return m_bWedged;
+	}
+
 	// Plain Win32 (EnumWindows + CreateToolhelp32Snapshot), not UI Automation - but every
 	// method below needs an HWND to start from (ElementFromHandle), so this lives here rather
 	// than being duplicated at every call site that needs "the" window for a process. Searches
@@ -197,6 +221,17 @@ class CUiAutomation {
 	void SendKey(WORD virtualKeyCode) const;
 
   private:
+	// Shared tail of every bounded lookup above: turns the throwaway thread's result into a
+	// CUiElement, and keeps the abandoned-call bookkeeping HasWedged() reports in exactly one
+	// place rather than repeated at five call sites.
+	CUiElement FinishBoundedLookup(Microsoft::WRL::ComPtr<IUIAutomationElement> pFound, bool bAbandoned) const;
+
 	Microsoft::WRL::ComPtr<IUIAutomation> m_pAutomation;
 	bool m_bComInitialized = false; // Init() owns a CoInitializeEx reference Shutdown() must balance
+
+	// See HasWedged. Mutable because every lookup below is const - they don't change what this
+	// object represents, they just keep count of how badly the other end is behaving. No
+	// synchronisation: an instance belongs to exactly one thread (see this file's own comment).
+	mutable std::uint32_t m_abandonedCallCount = 0;
+	mutable bool m_bWedged = false;
 };

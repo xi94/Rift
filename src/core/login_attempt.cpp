@@ -252,7 +252,7 @@ void RunLoginAttempt(SLoginAttemptState &state)
 	std::wstring errorMessage;
 	ESubmitResult result = SubmitAndWaitForResult(state, uiAutomation, errorMessage);
 	if (result == ESubmitResult::FORM_NOT_FOUND) {
-		StoreCancelledOrError(state, kFormTimeoutMessage);
+		StoreCancelledOrError(state, uiAutomation.HasWedged() ? kUnresponsiveClientMessage : kFormTimeoutMessage);
 		return;
 	}
 
@@ -286,7 +286,7 @@ void RunLoginAttempt(SLoginAttemptState &state)
 		const std::wstring previousErrorMessage = errorMessage;
 		result = SubmitAndWaitForResult(state, uiAutomation, errorMessage, &previousErrorMessage);
 		if (result == ESubmitResult::FORM_NOT_FOUND) {
-			StoreCancelledOrError(state, kFormTimeoutMessage);
+			StoreCancelledOrError(state, uiAutomation.HasWedged() ? kUnresponsiveClientMessage : kFormTimeoutMessage);
 			return;
 		}
 	}
@@ -294,6 +294,18 @@ void RunLoginAttempt(SLoginAttemptState &state)
 	if (result == ESubmitResult::ERROR_SHOWN) {
 		SetMessage(state.szMessage, SLoginAttemptState::kMaxMessageLength,
 				  LooksLikeInvalidCredentials(errorMessage) ? kInvalidCredentialsMessage : kServerErrorMessage);
+		StoreStage(state, ELoginStage::LOGIN_STAGE_ERROR);
+		return;
+	}
+
+	// Checked BEFORE the "no error appeared, so it worked" inference below, and this ordering is
+	// the entire reason CUiAutomation::HasWedged exists: a client whose accessibility provider
+	// stopped answering produces the exact same absence of an error element as a login that
+	// genuinely succeeded. Without this, the one failure mode this whole change is about would
+	// have surfaced as a cheerful green SUCCESS.
+	if (uiAutomation.HasWedged()) {
+		DebugLog::Write(kLogCategory, "UI Automation gave up on the client - refusing to infer success from silence");
+		SetMessage(state.szMessage, SLoginAttemptState::kMaxMessageLength, kUnresponsiveClientMessage);
 		StoreStage(state, ELoginStage::LOGIN_STAGE_ERROR);
 		return;
 	}

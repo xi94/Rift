@@ -103,6 +103,74 @@ BOOL CALLBACK FindTopLevelWindowProc(HWND hWnd, LPARAM lParam)
 	return FALSE; // found it, stop enumerating
 }
 
+// How long one cross-process lookup gets before it is written off as never coming back. The
+// numbers this sits between are real, from a captured log of the hang this exists for: an
+// ordinary ElementFromHandle/FindFirst against a settled Riot Client comes back in well under
+// 250ms, while the one that wedged was still inside the provider 39 seconds later. Anything in
+// between is arbitrary; five seconds is comfortably past the slowest legitimate first contact
+// (a cold Electron client building its whole accessibility tree) and still leaves room for the
+// retry that CRiotClient's own poll loops perform on the next iteration.
+constexpr auto kUiaCallTimeout = std::chrono::milliseconds(5000);
+
+// How many abandoned lookups one CUiAutomation tolerates before it declares the target wedged
+// and fails every later lookup instantly (see CUiAutomation::HasWedged). Each abandoned lookup
+// permanently strands one OS thread inside the provider, so this is really "how many threads is
+// one login attempt allowed to leak" - and a provider that has already failed to answer twice
+// in a row is not about to start. Two, times one instance per attempt, is a bounded cost;
+// letting the poll loops keep spawning them for their full timeout would not be.
+constexpr std::uint32_t kMaxAbandonedCalls = 2;
+
+// The out-parameter of one bounded lookup, heap-allocated and co-owned by the caller and the
+// throwaway thread - the same ownership shape SLoginAttemptState uses (see
+// core/login_attempt.h), and for the same reason: an abandoned thread that finally returns,
+// minutes later, must write into memory it still owns rather than into a frame that is long
+// gone.
+struct SBoundedLookupResult {
+	ComPtr<IUIAutomationElement> Element;
+};
+
+// Runs one cross-process UI Automation lookup on a throwaway thread and waits kUiaCallTimeout
+// for it. Returns the element it found (or nullptr), and sets bOutAbandoned if the thread had
+// to be let go still running.
+//
+// The throwaway thread joins the MTA itself: apartment membership is a property of the OS
+// thread, not of the interface pointer, and an MTA object used from a thread that never
+// initialised COM is undefined behaviour. It is a genuinely cheap call now that
+// CUiAutomation::KeepProcessMtaAlive holds the apartment open - before that, this would have
+// been building and tearing down the whole MTA on every poll iteration, which is precisely the
+// bug that function exists to prevent.
+//
+// fn is copied into the thread, so whatever it captures (the IUIAutomation, the root element)
+// is captured by value and keeps its own reference alive - an abandoned thread can therefore
+// never touch a released interface.
+template <typename TFunc>
+ComPtr<IUIAutomationElement> RunBoundedLookup(const char *pLabel, TFunc fn, bool &bOutAbandoned)
+{
+	auto pResult = std::make_shared<SBoundedLookupResult>();
+	std::thread worker([pResult, fn]() {
+		const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+		fn(pResult->Element);
+		if (comResult == S_OK || comResult == S_FALSE) {
+			CoUninitialize();
+		}
+	});
+
+	const DebugLog::CScope scope(kLogCategory, "%s", pLabel);
+	const auto waitResult =
+		WaitForSingleObject(worker.native_handle(), static_cast<DWORD>(kUiaCallTimeout.count()));
+	if (waitResult == WAIT_OBJECT_0) {
+		worker.join(); // already finished - this is instantaneous
+		bOutAbandoned = false;
+		return std::move(pResult->Element);
+	}
+
+	worker.detach(); // wedged inside the provider; nothing brings it back
+	bOutAbandoned = true;
+	DebugLog::Write(kLogCategory, "ABANDONED %s after %llums - the provider never answered", pLabel,
+					static_cast<unsigned long long>(kUiaCallTimeout.count()));
+	return nullptr;
+}
+
 // A VARIANT holding a copy of pText, freed automatically by VariantClear going out of scope -
 // every IUIAutomation property-condition/value call below needs one of these.
 struct AutoVariantString {
@@ -321,6 +389,22 @@ void CUiAutomation::Shutdown()
 	}
 }
 
+CUiElement CUiAutomation::FinishBoundedLookup(ComPtr<IUIAutomationElement> pFound, bool bAbandoned) const
+{
+	if (!bAbandoned) {
+		return pFound != nullptr ? CUiElement{std::move(pFound)} : CUiElement{};
+	}
+
+	m_abandonedCallCount += 1;
+	if (m_abandonedCallCount >= kMaxAbandonedCalls && !m_bWedged) {
+		m_bWedged = true;
+		DebugLog::Write(kLogCategory,
+						"GIVING UP on this target - %u lookup(s) abandoned; every later one now fails immediately",
+						m_abandonedCallCount);
+	}
+	return CUiElement{};
+}
+
 HWND CUiAutomation::FindTopLevelWindow(std::uint32_t processId)
 {
 	const std::vector<DWORD> candidateProcessIds = CollectDescendantProcessIds(static_cast<DWORD>(processId));
@@ -374,30 +458,30 @@ CUiElement CUiAutomation::WaitForWindowByName(const wchar_t *pTitle, std::uint32
 
 CUiElement CUiAutomation::ElementFromWindow(HWND hWnd) const
 {
-	if (m_pAutomation == nullptr || hWnd == nullptr) {
+	if (m_pAutomation == nullptr || hWnd == nullptr || m_bWedged) {
 		return CUiElement{};
 	}
 
-	// The first cross-process call of every poll iteration, and the one that has to wake the
-	// target's accessibility provider up - a Chromium/Electron client builds its whole
-	// accessibility tree on first contact, which is exactly the kind of work that can take
-	// arbitrarily long on a client that's still starting.
-	const DebugLog::CScope scope(kLogCategory, "ElementFromHandle(hwnd=0x%p)", hWnd);
+	// The call that has to wake the target's accessibility provider up - a Chromium/Electron
+	// client builds its whole accessibility tree on first contact - and the one confirmed, in a
+	// captured log, to have sat inside the provider for 39 seconds while the login worker had
+	// no way out of it. Bounded for exactly that reason.
+	char label[64];
+	_snprintf_s(label, _TRUNCATE, "ElementFromHandle(hwnd=0x%p)", hWnd);
 
-	ComPtr<IUIAutomationElement> pElement;
-	const HRESULT hr = m_pAutomation->ElementFromHandle(hWnd, &pElement);
-	if (FAILED(hr) || pElement == nullptr) {
-		DebugLog::Write(kLogCategory, "ElementFromHandle(hwnd=0x%p) failed hr=0x%08lX", hWnd,
-						static_cast<unsigned long>(hr));
-		return CUiElement{};
-	}
-
-	return CUiElement{std::move(pElement)};
+	bool bAbandoned = false;
+	auto pFound = RunBoundedLookup(
+		label,
+		[pAutomation = m_pAutomation, hWnd](ComPtr<IUIAutomationElement> &outElement) {
+			pAutomation->ElementFromHandle(hWnd, &outElement);
+		},
+		bAbandoned);
+	return FinishBoundedLookup(std::move(pFound), bAbandoned);
 }
 
 CUiElement CUiAutomation::FindFirstDescendantByAutomationId(const CUiElement &root, const wchar_t *pAutomationId) const
 {
-	if (m_pAutomation == nullptr || !root.IsValid()) {
+	if (m_pAutomation == nullptr || !root.IsValid() || m_bWedged) {
 		return CUiElement{};
 	}
 
@@ -409,21 +493,24 @@ CUiElement CUiAutomation::FindFirstDescendantByAutomationId(const CUiElement &ro
 	}
 
 	// TreeScope_Descendants against another process's whole UI tree, walked node by node over
-	// COM - the most expensive and least bounded call this class makes, and the one a wedged
-	// target actually strands a caller inside. Every one of them gets a breadcrumb so the
-	// watchdog can name it while it's still stuck rather than leaving a log that just stops.
-	const DebugLog::CScope scope(kLogCategory, "FindFirst(AutomationId=%ls)", pAutomationId);
+	// COM - the most expensive call this class makes, and one more place a wedged target could
+	// strand a caller. Bounded and breadcrumbed like every other lookup here.
+	char label[192];
+	_snprintf_s(label, _TRUNCATE, "FindFirst(AutomationId=%ls)", pAutomationId);
 
-	ComPtr<IUIAutomationElement> pFound;
-	if (FAILED(root.Get()->FindFirst(TreeScope_Descendants, pCondition.Get(), &pFound)) || pFound == nullptr) {
-		return CUiElement{};
-	}
-	return CUiElement{std::move(pFound)};
+	bool bAbandoned = false;
+	auto pFound = RunBoundedLookup(
+		label,
+		[pRoot = root.Get(), pCondition](ComPtr<IUIAutomationElement> &outElement) {
+			pRoot->FindFirst(TreeScope_Descendants, pCondition.Get(), &outElement);
+		},
+		bAbandoned);
+	return FinishBoundedLookup(std::move(pFound), bAbandoned);
 }
 
 CUiElement CUiAutomation::FindFirstDescendantByName(const CUiElement &root, const wchar_t *pName) const
 {
-	if (m_pAutomation == nullptr || !root.IsValid()) {
+	if (m_pAutomation == nullptr || !root.IsValid() || m_bWedged) {
 		return CUiElement{};
 	}
 
@@ -434,19 +521,22 @@ CUiElement CUiAutomation::FindFirstDescendantByName(const CUiElement &root, cons
 		return CUiElement{};
 	}
 
-	const DebugLog::CScope scope(kLogCategory, "FindFirst(Name=%ls)", pName);
+	char label[192];
+	_snprintf_s(label, _TRUNCATE, "FindFirst(Name=%ls)", pName);
 
-	ComPtr<IUIAutomationElement> pFound;
-	if (FAILED(root.Get()->FindFirst(TreeScope_Descendants, pCondition.Get(), &pFound)) || pFound == nullptr) {
-		return CUiElement{};
-	}
-
-	return CUiElement{std::move(pFound)};
+	bool bAbandoned = false;
+	auto pFound = RunBoundedLookup(
+		label,
+		[pRoot = root.Get(), pCondition](ComPtr<IUIAutomationElement> &outElement) {
+			pRoot->FindFirst(TreeScope_Descendants, pCondition.Get(), &outElement);
+		},
+		bAbandoned);
+	return FinishBoundedLookup(std::move(pFound), bAbandoned);
 }
 
 CUiElement CUiAutomation::FindFirstDescendantByControlType(const CUiElement &root, CONTROLTYPEID controlType) const
 {
-	if (m_pAutomation == nullptr || !root.IsValid()) {
+	if (m_pAutomation == nullptr || !root.IsValid() || m_bWedged) {
 		return CUiElement{};
 	}
 
@@ -461,19 +551,23 @@ CUiElement CUiAutomation::FindFirstDescendantByControlType(const CUiElement &roo
 		return CUiElement{};
 	}
 
-	const DebugLog::CScope scope(kLogCategory, "FindFirst(ControlType=%d)", static_cast<int>(controlType));
+	char label[64];
+	_snprintf_s(label, _TRUNCATE, "FindFirst(ControlType=%d)", static_cast<int>(controlType));
 
-	ComPtr<IUIAutomationElement> pFound;
-	if (FAILED(root.Get()->FindFirst(TreeScope_Descendants, pCondition.Get(), &pFound)) || pFound == nullptr) {
-		return CUiElement{};
-	}
-	return CUiElement{std::move(pFound)};
+	bool bAbandoned = false;
+	auto pFound = RunBoundedLookup(
+		label,
+		[pRoot = root.Get(), pCondition](ComPtr<IUIAutomationElement> &outElement) {
+			pRoot->FindFirst(TreeScope_Descendants, pCondition.Get(), &outElement);
+		},
+		bAbandoned);
+	return FinishBoundedLookup(std::move(pFound), bAbandoned);
 }
 
 CUiElement CUiAutomation::FindFirstDescendantByNameAndControlType(const CUiElement &root, const wchar_t *pName,
 																   CONTROLTYPEID controlType) const
 {
-	if (m_pAutomation == nullptr || !root.IsValid()) {
+	if (m_pAutomation == nullptr || !root.IsValid() || m_bWedged) {
 		return CUiElement{};
 	}
 
@@ -500,14 +594,17 @@ CUiElement CUiAutomation::FindFirstDescendantByNameAndControlType(const CUiEleme
 		return CUiElement{};
 	}
 
-	const DebugLog::CScope scope(kLogCategory, "FindFirst(Name=%ls, ControlType=%d)", pName,
-								 static_cast<int>(controlType));
+	char label[192];
+	_snprintf_s(label, _TRUNCATE, "FindFirst(Name=%ls, ControlType=%d)", pName, static_cast<int>(controlType));
 
-	ComPtr<IUIAutomationElement> pFound;
-	if (FAILED(root.Get()->FindFirst(TreeScope_Descendants, pAndCondition.Get(), &pFound)) || pFound == nullptr) {
-		return CUiElement{};
-	}
-	return CUiElement{std::move(pFound)};
+	bool bAbandoned = false;
+	auto pFound = RunBoundedLookup(
+		label,
+		[pRoot = root.Get(), pAndCondition](ComPtr<IUIAutomationElement> &outElement) {
+			pRoot->FindFirst(TreeScope_Descendants, pAndCondition.Get(), &outElement);
+		},
+		bAbandoned);
+	return FinishBoundedLookup(std::move(pFound), bAbandoned);
 }
 
 CUiElement CUiAutomation::WaitForDescendantByAutomationId(const CUiElement &root, const wchar_t *pAutomationId,
