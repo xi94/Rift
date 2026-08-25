@@ -132,7 +132,7 @@ class CSettingsPanel : public CWidget {
 	float m_flAnimationsToggleAmount = 1.0f; // animated 0..1, drives the toggle-switch dot
 	float m_flRoundedCornersToggleAmount = 1.0f;
 	float m_flExcludeFromCaptureToggleAmount = 1.0f;
-	float m_flMinimizeToTrayToggleAmount = 1.0f;
+	float m_flCloseToTrayToggleAmount = 1.0f;
 
 	// The Accent Color swatch's popup - opened/closed by clicking the swatch (see
 	// HandleClick); dragging any of its controls applies the result live into

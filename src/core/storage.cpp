@@ -181,7 +181,7 @@ bool CStorage::SaveSettings(const CSettings &settings, std::int32_t carouselZoom
 						 settings.m_clrAccent.A};
 	j["font_name"] = std::string(settings.m_szFontName);
 	j["exclude_account_list_from_capture"] = settings.m_bExcludeAccountListFromCapture;
-	j["minimize_to_tray"] = settings.m_bMinimizeToTray;
+	j["close_to_tray"] = settings.m_bCloseToTray;
 	j["carousel_zoom_stop"] = carouselZoomStop;
 	j["carousel_selected_banner"] = carouselSelectedBanner;
 
@@ -243,7 +243,11 @@ EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &out
 
 	settings.m_bExcludeAccountListFromCapture =
 		j.value("exclude_account_list_from_capture", settings.m_bExcludeAccountListFromCapture);
-	settings.m_bMinimizeToTray = j.value("minimize_to_tray", settings.m_bMinimizeToTray);
+	// "minimize_to_tray" is what this setting was called back when it hooked minimize
+	// rather than close - read as the fallback so an existing settings.json keeps the
+	// user's choice instead of silently reverting to the default.
+	settings.m_bCloseToTray =
+		j.value("close_to_tray", j.value("minimize_to_tray", settings.m_bCloseToTray));
 	outCarouselZoomStop = j.value("carousel_zoom_stop", outCarouselZoomStop);
 	outCarouselSelectedBanner = j.value("carousel_selected_banner", outCarouselSelectedBanner);
 

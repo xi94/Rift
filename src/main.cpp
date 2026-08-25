@@ -619,12 +619,14 @@ int main(int argc, char *argv[])
 	while (!window.ShouldClose()) {
 		window.PumpMessages();
 
-		window.SetMinimizeToTray(settings.m_bMinimizeToTray && tray.IsIconVisible());
+		window.SetCloseToTray(settings.m_bCloseToTray && tray.IsIconVisible());
 		tray.SetAccentColor(settings.m_clrAccent);
 
 		const ETrayEventType trayEvent = tray.TakeEvent();
 		if (trayEvent == ETrayEventType::TRAY_EVENT_EXIT_REQUESTED) {
-			PostMessageW(window.GetHandle(), WM_CLOSE, 0, 0);
+			// RequestClose, not a posted WM_CLOSE: with close-to-tray on, WM_CLOSE only
+			// hides the window, and the tray's Exit item means exit.
+			window.RequestClose();
 		} else if (trayEvent == ETrayEventType::TRAY_EVENT_SHOW_WINDOW) {
 			window.Restore();
 		} else if (trayEvent == ETrayEventType::TRAY_EVENT_QUICK_LOGIN) {
@@ -926,9 +928,11 @@ int main(int argc, char *argv[])
 
 		// A verified update has been swapped into this exe's own path and is ready to run -
 		// save everything, spawn a fresh process at that same path (now the new build), and
-		// cleanly exit this one through the normal WM_CLOSE/ShouldClose path rather than
-		// calling ExitProcess directly, so the usual end-of-scope teardown (SaveNow below,
-		// CRendererD3D11's own GPU-resource release order) still runs.
+		// cleanly exit this one through the normal ShouldClose path rather than calling
+		// ExitProcess directly, so the usual end-of-scope teardown (SaveNow below,
+		// CRendererD3D11's own GPU-resource release order) still runs. RequestClose rather
+		// than a posted WM_CLOSE for the same reason the tray's Exit uses it: close-to-tray
+		// would otherwise turn this into a hide, leaving two copies of Rift running.
 		if (updater.ConsumeReadyToRelaunch()) {
 			SaveNow(*pCarousel, settings, masterKey);
 
@@ -950,7 +954,7 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			PostMessageW(window.GetHandle(), WM_CLOSE, 0, 0);
+			window.RequestClose();
 		}
 
 		// Excludes the window from screenshots/screen recordings/screen shares while the
@@ -976,9 +980,10 @@ int main(int argc, char *argv[])
 		// gets submitted below.
 		renderer.SetEffectTime(timeSeconds);
 
-		// Hidden in the tray: nothing to present, so don't - but keep pumping messages and
-		// running everything above, since a tray quick-login has to work while hidden.
-		if (window.IsHidden()) {
+		// Hidden in the tray, or minimized to the taskbar: nothing to present, so don't -
+		// but keep pumping messages and running everything above, since a tray quick-login
+		// has to work while hidden.
+		if (window.IsHidden() || window.IsMinimized()) {
 			Sleep(16);
 		} else {
 			RenderFrame(renderContext);

@@ -423,7 +423,16 @@ LRESULT CWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 			return HTCLIENT;
 		}
 
+		// Close-to-tray turns the close button into a hide: the app keeps running behind the
+		// tray icon (which is what makes its quick-login menu worth having) and only the
+		// tray's own Exit item - or anything else calling RequestClose - actually quits.
+		// CWindow never enables this on its own; main.cpp only sets it while a tray icon is
+		// really there, so a failed tray creation can't leave the window unclosable.
 		case WM_CLOSE:
+			if (m_bCloseToTray) {
+				ShowWindow(m_hWnd, SW_HIDE);
+				return 0;
+			}
 			m_bShouldClose = true;
 			return 0;
 
@@ -464,10 +473,6 @@ LRESULT CWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 		}
 
 		case WM_SIZE: {
-			if (wParam == SIZE_MINIMIZED && m_bMinimizeToTray) {
-				ShowWindow(m_hWnd, SW_HIDE);
-				return 0;
-			}
 			m_nPhysicalWidth = LOWORD(lParam);
 			m_nPhysicalHeight = HIWORD(lParam);
 			m_nWidth =

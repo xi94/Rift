@@ -42,9 +42,11 @@ struct CSettings {
 	// they realize it exists.
 	bool m_bExcludeAccountListFromCapture = true;
 
-	// Minimizing hides the window to the tray icon instead of the taskbar. On by default -
-	// the tray menu's quick login is the point of having a tray icon at all.
-	bool m_bMinimizeToTray = true;
+	// Closing the window hides it to the tray icon instead of quitting; the tray menu's
+	// Exit item is then what actually ends the app. On by default - the tray menu's quick
+	// login is the point of having a tray icon at all, and it's only reachable while Rift
+	// is still running. Minimizing is unaffected: it always goes to the taskbar.
+	bool m_bCloseToTray = true;
 
 	// The master-password KEK/DEK params CMasterKey::Set produced (see its own file
 	// comment) - not secret on their own (nobody recovers the DEK from these without the

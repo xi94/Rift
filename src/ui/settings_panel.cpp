@@ -313,7 +313,7 @@ struct SettingsRows {
 	Rect Animations;
 	Rect RoundedCorners;
 	Rect ExcludeFromCapture;
-	Rect MinimizeToTray;
+	Rect CloseToTray;
 	Rect AnimationSpeed;
 	Rect Accent;
 	Rect MasterPassword;
@@ -337,7 +337,7 @@ SettingsRows ComputeRows(Rect scrollRegion, float scrollOffset, const CFontManag
 	rows.Animations = RectSplitTop(cursor, rowHeight);
 	rows.RoundedCorners = RectSplitTop(cursor, rowHeight);
 	rows.ExcludeFromCapture = RectSplitTop(cursor, rowHeight);
-	rows.MinimizeToTray = RectSplitTop(cursor, rowHeight);
+	rows.CloseToTray = RectSplitTop(cursor, rowHeight);
 	rows.AnimationSpeed = RectSplitTop(cursor, rowHeight);
 	rows.Accent = RectSplitTop(cursor, rowHeight);
 	rows.MasterPassword = RectSplitTop(cursor, rowHeight);
@@ -506,8 +506,8 @@ void CSettingsPanel::Update(float deltaSeconds)
 	m_flRoundedCornersToggleAmount =
 		CAnimator::EaseToward(m_flRoundedCornersToggleAmount, m_settings.m_bRoundedCornersEnabled ? 1.0f : 0.0f,
 							  kToggleEaseRate, deltaSeconds);
-	m_flMinimizeToTrayToggleAmount =
-		CAnimator::EaseToward(m_flMinimizeToTrayToggleAmount, m_settings.m_bMinimizeToTray ? 1.0f : 0.0f,
+	m_flCloseToTrayToggleAmount =
+		CAnimator::EaseToward(m_flCloseToTrayToggleAmount, m_settings.m_bCloseToTray ? 1.0f : 0.0f,
 							  kToggleEaseRate, deltaSeconds);
 	m_flExcludeFromCaptureToggleAmount =
 		CAnimator::EaseToward(m_flExcludeFromCaptureToggleAmount,
@@ -663,8 +663,8 @@ ECursorKind CSettingsPanel::GetDesiredCursor() const
 		RectContainsPoint(ToggleRect(rows.ExcludeFromCapture, m_fonts), m_flMouseX, m_flMouseY)) {
 		return ECursorKind::CURSOR_HAND;
 	}
-	if (RowInView(rows.MinimizeToTray, layout.ScrollRegion) &&
-		RectContainsPoint(ToggleRect(rows.MinimizeToTray, m_fonts), m_flMouseX, m_flMouseY)) {
+	if (RowInView(rows.CloseToTray, layout.ScrollRegion) &&
+		RectContainsPoint(ToggleRect(rows.CloseToTray, m_fonts), m_flMouseX, m_flMouseY)) {
 		return ECursorKind::CURSOR_HAND;
 	}
 	if (RowInView(rows.AnimationSpeed, layout.ScrollRegion) &&
@@ -764,9 +764,9 @@ bool CSettingsPanel::HandleClick(float x, float y)
 		m_settings.m_bExcludeAccountListFromCapture = !m_settings.m_bExcludeAccountListFromCapture;
 	}
 
-	if (clickInScrollRegion && RowInView(rows.MinimizeToTray, layout.ScrollRegion) &&
-		RectContainsPoint(ToggleRect(rows.MinimizeToTray, m_fonts), x, y)) {
-		m_settings.m_bMinimizeToTray = !m_settings.m_bMinimizeToTray;
+	if (clickInScrollRegion && RowInView(rows.CloseToTray, layout.ScrollRegion) &&
+		RectContainsPoint(ToggleRect(rows.CloseToTray, m_fonts), x, y)) {
+		m_settings.m_bCloseToTray = !m_settings.m_bCloseToTray;
 	}
 
 	// Animation Speed's slider is dragged, not clicked - see OnPointerDown/Move, which
@@ -958,10 +958,10 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 				   m_settings.m_clrAccent, alpha);
 	}
 
-	if (RowInView(rows.MinimizeToTray, layout.ScrollRegion)) {
-		DrawRowLabel(drawList, m_fonts, rows.MinimizeToTray, "Minimize To Tray",
-					 "Minimizing hides Rift to the system tray instead of the taskbar.", alpha);
-		DrawToggle(drawList, ToggleRect(rows.MinimizeToTray, m_fonts), m_flMinimizeToTrayToggleAmount,
+	if (RowInView(rows.CloseToTray, layout.ScrollRegion)) {
+		DrawRowLabel(drawList, m_fonts, rows.CloseToTray, "Close To Tray",
+					 "Closing hides Rift to the system tray instead of quitting.", alpha);
+		DrawToggle(drawList, ToggleRect(rows.CloseToTray, m_fonts), m_flCloseToTrayToggleAmount,
 				   m_settings.m_clrAccent, alpha);
 	}
 

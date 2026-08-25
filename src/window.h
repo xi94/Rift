@@ -209,11 +209,23 @@ class CWindow {
 		m_bUpdateButtonVisible = visible;
 	}
 
-	// While true, a minimize (the title bar's own button, or the OS's) hides the window
-	// instead, leaving the tray icon as the only way back to it.
-	void SetMinimizeToTray(bool minimizeToTray)
+	// While true, a close (the title bar's own button, Alt+F4, the taskbar's Close
+	// command) hides the window instead of quitting, leaving the tray icon as the only way
+	// back to it - so a close request stops reaching ShouldClose at all, and anything that
+	// wants the app to genuinely exit has to go through RequestClose below. Minimizing is
+	// unaffected either way: it always minimizes to the taskbar like any other window.
+	void SetCloseToTray(bool closeToTray)
 	{
-		m_bMinimizeToTray = minimizeToTray;
+		m_bCloseToTray = closeToTray;
+	}
+
+	// Ends the app for real, regardless of SetCloseToTray - for the paths that mean "exit",
+	// not "the user pressed the close button" (the tray menu's own Exit item, the updater's
+	// relaunch). Sets the same flag WM_CLOSE would, so the normal ShouldClose teardown
+	// still runs.
+	void RequestClose()
+	{
+		m_bShouldClose = true;
 	}
 
 	bool IsHidden() const
@@ -221,7 +233,14 @@ class CWindow {
 		return IsWindowVisible(m_hWnd) == FALSE;
 	}
 
-	// Undoes a minimize-to-tray hide, or an ordinary minimize.
+	// Minimized to the taskbar - visible as far as IsHidden is concerned, but with a zero
+	// client size and nothing on screen to present to.
+	bool IsMinimized() const
+	{
+		return IsIconic(m_hWnd) != FALSE;
+	}
+
+	// Undoes a close-to-tray hide, or an ordinary minimize.
 	void Restore();
 
 	// Asks an already-running Rift to show itself, for a second instance to call before
@@ -246,7 +265,7 @@ class CWindow {
 
 	bool m_bShouldClose = false;
 	bool m_bUpdateButtonVisible = false; // see SetUpdateButtonVisible
-	bool m_bMinimizeToTray = false;		 // see SetMinimizeToTray
+	bool m_bCloseToTray = false;			 // see SetCloseToTray
 
 	// SetCapture on WM_LBUTTONDOWN keeps WM_MOUSEMOVE/WM_LBUTTONUP routed to this window
 	// even once the cursor leaves the client area mid-drag - without it, dragging the
