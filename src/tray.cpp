@@ -356,31 +356,26 @@ void CTray::ShowContextMenu()
 	menuInfo.hbrBack = m_hBackBrush;
 	SetMenuInfo(menu, &menuInfo);
 
-	// Which way the menu unfolds from the cursor. A tray icon is by definition next to the
-	// taskbar, so the plain default (down and to the right) grows the menu straight into it
-	// and the last item - Exit - ends up underneath it. Picking the direction from which
-	// half of the work area the cursor is in handles a taskbar on any edge: bottom-right
-	// tray opens up-and-left, a top taskbar opens down, and so on.
-	UINT alignFlags = TPM_LEFTALIGN | TPM_TOPALIGN;
-	MONITORINFO monitorInfo{};
-	monitorInfo.cbSize = sizeof(monitorInfo);
-	if (GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &monitorInfo)) {
-		const LONG centerX = (monitorInfo.rcWork.left + monitorInfo.rcWork.right) / 2;
-		const LONG centerY = (monitorInfo.rcWork.top + monitorInfo.rcWork.bottom) / 2;
-		alignFlags = (cursor.x >= centerX ? TPM_RIGHTALIGN : TPM_LEFTALIGN) |
-					 (cursor.y >= centerY ? TPM_BOTTOMALIGN : TPM_TOPALIGN);
-	}
-
 	// Required so the menu dismisses correctly when the user clicks away from it.
 	SetForegroundWindow(m_hWnd);
-	// TPM_WORKAREA is the actual guarantee: it clamps the menu to the monitor's work area
-	// (which excludes the taskbar) rather than to the full screen, so even a menu too tall
-	// to fit is kept off it instead of running underneath. It's only honored by
-	// TrackPopupMenuEx, and only when a TPMPARAMS is supplied - an empty rcExclude means
-	// "nothing to avoid beyond that", which is all this needs.
+
+	// Anchored at the pointer with the default alignment, the way every other tray menu on
+	// Windows behaves - the earlier version picked its own corner alignment from which half
+	// of the screen the cursor was in, which put the menu nowhere near the pointer.
+	//
+	// TPM_WORKAREA is the one addition, and it's what keeps the menu off the taskbar: by
+	// default Windows only flips a menu up when it wouldn't fit on the *monitor*, so a menu
+	// that fits on screen but not above the taskbar is drawn underneath it and its last item
+	// (Exit) becomes unreachable. With this, the fit decision uses the work area instead, so
+	// the flip happens when it actually needs to. The flag is only honored by
+	// TrackPopupMenuEx and only with a TPMPARAMS - rcExclude is a degenerate rect at the
+	// cursor rather than an all-zero one, which would name a real area at the screen's
+	// top-left corner for Windows to position around.
 	TPMPARAMS popupParams{};
 	popupParams.cbSize = sizeof(popupParams);
-	TrackPopupMenuEx(menu, alignFlags | TPM_RIGHTBUTTON | TPM_WORKAREA, cursor.x, cursor.y, m_hWnd, &popupParams);
+	popupParams.rcExclude = RECT{cursor.x, cursor.y, cursor.x, cursor.y};
+	TrackPopupMenuEx(menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON | TPM_WORKAREA, cursor.x, cursor.y, m_hWnd,
+					 &popupParams);
 	PostMessageW(m_hWnd, WM_NULL, 0, 0);
 
 	DestroyMenu(menu);
