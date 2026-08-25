@@ -867,8 +867,11 @@ void CSettingsPanel::ResetTargetToDefault(ESettingsResetTarget target)
 			CDrawList::SetRoundedCornersEnabled(m_settings.m_bRoundedCornersEnabled);
 			break;
 		case ESettingsResetTarget::SETTINGS_RESET_CORNER_ROUNDNESS:
+			// No SetCornerRoundnessScale here on purpose - applying it now is exactly what
+			// made every corner in the app snap to the default while the slider was still
+			// gliding back to it. Update drives the real scale from the eased display copy,
+			// so leaving this alone is what animates it.
 			m_settings.m_flCornerRoundness = defaults.m_flCornerRoundness;
-			CDrawList::SetCornerRoundnessScale(m_settings.m_flCornerRoundness);
 			break;
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
 			m_settings.m_bAnimationsEnabled = defaults.m_bAnimationsEnabled;
@@ -946,6 +949,15 @@ void CSettingsPanel::Update(float deltaSeconds)
 		m_flCornerRoundnessDisplay = CAnimator::EaseToward(m_flCornerRoundnessDisplay, m_settings.m_flCornerRoundness,
 														   kValueEaseRate, deltaSeconds);
 	}
+	// Corner Roundness is the one display copy that also drives the real thing: the whole
+	// UI's corners follow the eased value rather than the settled one, so a reset travels
+	// back exactly as if the slider were being dragged there. Every other display copy here
+	// only feeds its own control's drawing, because nothing else on this panel is a live
+	// property of every shape on screen. CSettings still holds the settled value - that's
+	// what persists - and this runs every frame whether the panel is open or not, so the
+	// two are never left disagreeing.
+	CDrawList::SetCornerRoundnessScale(m_flCornerRoundnessDisplay);
+
 	m_flAccentDisplayR = CAnimator::EaseToward(m_flAccentDisplayR, static_cast<float>(m_settings.m_clrAccent.R),
 											   kValueEaseRate, deltaSeconds);
 	m_flAccentDisplayG = CAnimator::EaseToward(m_flAccentDisplayG, static_cast<float>(m_settings.m_clrAccent.G),
