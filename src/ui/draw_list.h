@@ -165,20 +165,17 @@ class CDrawList {
 		return m_pIndices;
 	}
 
-	// Toggle-aware corner radii for a uniform rounding: 0 on every corner when Round
-	// Corners is off in settings. Deliberately separate from core/types.h's plain
-	// CornerRadiiUniform (which always honors the requested radius) - every rounded shape
-	// in this project should request its radius through this one instead, so the settings
-	// toggle has exactly one place to hook into.
+	// Settings-aware corner radii for a uniform rounding. Deliberately separate from
+	// core/types.h's plain CornerRadiiUniform (which always honors the requested radius) -
+	// every rounded shape in this project should request its radius through this one
+	// instead, so the Corner Roundness setting has exactly one place to hook into.
 	static CornerRadii UniformRadii(float radius);
-	static void SetRoundedCornersEnabled(bool enabled);
-	static bool RoundedCornersEnabled();
 
-	// The radius a request for `radius` actually gets: 0 while Round Corners is off, and
-	// otherwise scaled by the Corner Roundness setting. UniformRadii is this applied to all
-	// four corners; the one other caller is the banner glow, whose shader takes a radius
-	// directly rather than a CornerRadii and would otherwise draw a rounded halo around a
-	// square card (or a differently-rounded one) the moment either setting moved.
+	// The radius a request for `radius` actually gets: the design radius scaled by the
+	// Corner Roundness setting, which squares every corner in the app at 0. UniformRadii is
+	// this applied to all four corners; the other callers are Radii below and the banner
+	// glow, whose shader takes a radius directly rather than a CornerRadii and would
+	// otherwise draw a differently-rounded halo the moment the setting moved.
 	static float ScaledRadius(float radius);
 	static void SetCornerRoundnessScale(float scale);
 

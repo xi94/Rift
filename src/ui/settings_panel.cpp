@@ -419,7 +419,6 @@ struct SettingsRows {
 	Rect FontSize;
 	Rect SecondaryFontSize;
 	Rect Accent;
-	Rect RoundedCorners;
 	Rect CornerRoundness;
 	Rect SectionMotion;
 	Rect Animations;
@@ -456,7 +455,6 @@ SettingsRows ComputeRows(Rect scrollRegion, float scrollOffset, const CFontManag
 	rows.FontSize = RectSplitTop(cursor, rowHeight);
 	rows.SecondaryFontSize = RectSplitTop(cursor, rowHeight);
 	rows.Accent = RectSplitTop(cursor, rowHeight);
-	rows.RoundedCorners = RectSplitTop(cursor, rowHeight);
 	rows.CornerRoundness = RectSplitTop(cursor, rowHeight);
 
 	rows.SectionMotion = RectSplitTop(cursor, sectionHeight);
@@ -489,8 +487,6 @@ Rect ResetTargetRowRect(const SettingsRows &rows, ESettingsResetTarget target)
 			return rows.SecondaryFontSize;
 		case ESettingsResetTarget::SETTINGS_RESET_ACCENT:
 			return rows.Accent;
-		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
-			return rows.RoundedCorners;
 		case ESettingsResetTarget::SETTINGS_RESET_CORNER_ROUNDNESS:
 			return rows.CornerRoundness;
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
@@ -519,8 +515,6 @@ Rect ResetTargetControlRect(const SettingsRows &rows, ESettingsResetTarget targe
 			return StepperRect(rows.SecondaryFontSize, fonts);
 		case ESettingsResetTarget::SETTINGS_RESET_ACCENT:
 			return SwatchRect(rows.Accent, fonts);
-		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
-			return ToggleRect(rows.RoundedCorners, fonts);
 		case ESettingsResetTarget::SETTINGS_RESET_CORNER_ROUNDNESS:
 			return SliderControlRect(rows.CornerRoundness, fonts);
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
@@ -808,8 +802,6 @@ bool CSettingsPanel::IsTargetAtDefault(ESettingsResetTarget target) const
 				   m_settings.m_clrAccent.G == defaults.m_clrAccent.G &&
 				   m_settings.m_clrAccent.B == defaults.m_clrAccent.B &&
 				   m_settings.m_clrAccent.A == defaults.m_clrAccent.A;
-		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
-			return m_settings.m_bRoundedCornersEnabled == defaults.m_bRoundedCornersEnabled;
 		case ESettingsResetTarget::SETTINGS_RESET_CORNER_ROUNDNESS:
 			return std::fabs(m_settings.m_flCornerRoundness - defaults.m_flCornerRoundness) < kEpsilon;
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
@@ -861,10 +853,6 @@ void CSettingsPanel::ResetTargetToDefault(ESettingsResetTarget target)
 			// stopped being current - closing it is the honest outcome, and reopening it
 			// picks up the restored value the way it always does.
 			m_colorPicker.Close();
-			break;
-		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
-			m_settings.m_bRoundedCornersEnabled = defaults.m_bRoundedCornersEnabled;
-			CDrawList::SetRoundedCornersEnabled(m_settings.m_bRoundedCornersEnabled);
 			break;
 		case ESettingsResetTarget::SETTINGS_RESET_CORNER_ROUNDNESS:
 			// No SetCornerRoundnessScale here on purpose - applying it now is exactly what
@@ -920,9 +908,6 @@ void CSettingsPanel::Update(float deltaSeconds)
 	// EaseToward itself respects that flag - no special-casing needed here.
 	m_flAnimationsToggleAmount = CAnimator::EaseToward(
 		m_flAnimationsToggleAmount, m_settings.m_bAnimationsEnabled ? 1.0f : 0.0f, kToggleEaseRate, deltaSeconds);
-	m_flRoundedCornersToggleAmount =
-		CAnimator::EaseToward(m_flRoundedCornersToggleAmount, m_settings.m_bRoundedCornersEnabled ? 1.0f : 0.0f,
-							  kToggleEaseRate, deltaSeconds);
 	m_flCloseToTrayToggleAmount = CAnimator::EaseToward(
 		m_flCloseToTrayToggleAmount, m_settings.m_bCloseToTray ? 1.0f : 0.0f, kToggleEaseRate, deltaSeconds);
 	m_flExcludeFromCaptureToggleAmount =
@@ -1185,10 +1170,6 @@ ECursorKind CSettingsPanel::GetDesiredCursor() const
 		RectContainsPoint(ToggleRect(rows.Animations, m_fonts), m_flMouseX, m_flMouseY)) {
 		return ECursorKind::CURSOR_HAND;
 	}
-	if (RowInView(rows.RoundedCorners, layout.ScrollRegion) &&
-		RectContainsPoint(ToggleRect(rows.RoundedCorners, m_fonts), m_flMouseX, m_flMouseY)) {
-		return ECursorKind::CURSOR_HAND;
-	}
 	if (RowInView(rows.ExcludeFromCapture, layout.ScrollRegion) &&
 		RectContainsPoint(ToggleRect(rows.ExcludeFromCapture, m_fonts), m_flMouseX, m_flMouseY)) {
 		return ECursorKind::CURSOR_HAND;
@@ -1303,12 +1284,6 @@ bool CSettingsPanel::HandleClick(float x, float y)
 		RectContainsPoint(ToggleRect(rows.Animations, m_fonts), x, y)) {
 		m_settings.m_bAnimationsEnabled = !m_settings.m_bAnimationsEnabled;
 		CAnimator::SetEnabled(m_settings.m_bAnimationsEnabled);
-	}
-
-	if (clickInScrollRegion && RowInView(rows.RoundedCorners, layout.ScrollRegion) &&
-		RectContainsPoint(ToggleRect(rows.RoundedCorners, m_fonts), x, y)) {
-		m_settings.m_bRoundedCornersEnabled = !m_settings.m_bRoundedCornersEnabled;
-		CDrawList::SetRoundedCornersEnabled(m_settings.m_bRoundedCornersEnabled);
 	}
 
 	if (clickInScrollRegion && RowInView(rows.ExcludeFromCapture, layout.ScrollRegion) &&
@@ -1462,10 +1437,9 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 	// The hovered row's band, painted before any row content so every label and control
 	// lands on top of it. Deliberately not eased: a highlight that fades behind a moving
 	// cursor trails the thing it's supposed to be marking.
-	const Rect hoverableRows[]{rows.CornerRoundness,   rows.Font,			rows.FontSize,
-							   rows.SecondaryFontSize, rows.Accent,			rows.RoundedCorners,
-							   rows.Animations,		   rows.AnimationSpeed, rows.ExcludeFromCapture,
-							   rows.CloseToTray,	   rows.MasterPassword};
+	const Rect hoverableRows[]{rows.CornerRoundness, rows.Font,			 rows.FontSize,		  rows.SecondaryFontSize,
+							   rows.Accent,			 rows.Animations,	 rows.AnimationSpeed, rows.ExcludeFromCapture,
+							   rows.CloseToTray,	 rows.MasterPassword};
 	if (IsBlocking() && !m_colorPicker.IsBlocking() && RectContainsPoint(layout.ScrollRegion, m_flMouseX, m_flMouseY)) {
 		for (const Rect &row : hoverableRows) {
 			if (RowInView(row, layout.ScrollRegion) && RectContainsPoint(row, m_flMouseX, m_flMouseY)) {
@@ -1524,23 +1498,6 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 					 LabelRightEdge(ToggleRect(rows.Animations, m_fonts), rows.Animations, m_fonts), alpha);
 		DrawToggle(drawList, ToggleRect(rows.Animations, m_fonts), m_flAnimationsToggleAmount, m_settings.m_clrAccent,
 				   alpha);
-	}
-
-	if (RowInView(rows.RoundedCorners, layout.ScrollRegion)) {
-		DrawRowLabel(drawList, m_fonts, rows.RoundedCorners, "Round Corners",
-					 "Applies rounding to popups, banners, and buttons.",
-					 LabelRightEdge(ToggleRect(rows.RoundedCorners, m_fonts), rows.RoundedCorners, m_fonts), alpha);
-		DrawToggle(drawList, ToggleRect(rows.RoundedCorners, m_fonts), m_flRoundedCornersToggleAmount,
-				   m_settings.m_clrAccent, alpha);
-	}
-
-	if (RowInView(rows.ExcludeFromCapture, layout.ScrollRegion)) {
-		DrawRowLabel(drawList, m_fonts, rows.ExcludeFromCapture, "Hide From Screen Capture",
-					 "Excludes the account list from screenshots and screen sharing.",
-					 LabelRightEdge(ToggleRect(rows.ExcludeFromCapture, m_fonts), rows.ExcludeFromCapture, m_fonts),
-					 alpha);
-		DrawToggle(drawList, ToggleRect(rows.ExcludeFromCapture, m_fonts), m_flExcludeFromCaptureToggleAmount,
-				   m_settings.m_clrAccent, alpha);
 	}
 
 	if (RowInView(rows.CornerRoundness, layout.ScrollRegion)) {

@@ -10,7 +10,6 @@
 namespace {
 constexpr float kPi = 3.14159265358979323846f;
 
-bool g_bRoundedCornersEnabled = true;
 float g_flCornerRoundnessScale = 1.0f;
 
 // Plain structural equality - Rect has no operator== of its own, and this is only
@@ -53,7 +52,7 @@ Color ColorFadeAlpha(Color color, std::uint8_t alpha)
 
 float CDrawList::ScaledRadius(float radius)
 {
-	return g_bRoundedCornersEnabled ? radius * g_flCornerRoundnessScale : 0.0f;
+	return radius * g_flCornerRoundnessScale;
 }
 
 void CDrawList::SetCornerRoundnessScale(float scale)
@@ -74,16 +73,6 @@ CornerRadii CDrawList::Radii(float topLeft, float topRight, float bottomRight, f
 {
 	return CornerRadii{ScaledRadius(topLeft), ScaledRadius(topRight), ScaledRadius(bottomRight),
 					   ScaledRadius(bottomLeft)};
-}
-
-void CDrawList::SetRoundedCornersEnabled(bool enabled)
-{
-	g_bRoundedCornersEnabled = enabled;
-}
-
-bool CDrawList::RoundedCornersEnabled()
-{
-	return g_bRoundedCornersEnabled;
 }
 
 void CDrawList::Init(CMemoryArena &arena, std::uint32_t vertexCapacity, std::uint32_t indexCapacity)

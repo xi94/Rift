@@ -75,7 +75,6 @@ enum class ESettingsResetTarget : std::uint8_t {
 	SETTINGS_RESET_FONT_SIZE,
 	SETTINGS_RESET_SECONDARY_FONT_SIZE,
 	SETTINGS_RESET_ACCENT,
-	SETTINGS_RESET_ROUNDED_CORNERS,
 	SETTINGS_RESET_CORNER_ROUNDNESS,
 	SETTINGS_RESET_ANIMATIONS,
 	SETTINGS_RESET_ANIMATION_SPEED,
@@ -187,7 +186,6 @@ class CSettingsPanel : public CWidget {
 
 	CTextInput m_fontNameInput;
 	float m_flAnimationsToggleAmount = 1.0f; // animated 0..1, drives the toggle-switch dot
-	float m_flRoundedCornersToggleAmount = 1.0f;
 	float m_flExcludeFromCaptureToggleAmount = 1.0f;
 	float m_flCloseToTrayToggleAmount = 1.0f;
 

@@ -25,12 +25,11 @@ struct CSettings {
 	bool m_bAnimationsEnabled = true;
 	float m_flAnimationSpeed =
 		1.0f; // multiplier on every eased animation's rate - see CAnimator::SetSpeed. 1.0 = normal speed.
-	bool m_bRoundedCornersEnabled = true;
-
 	// Multiplies every corner radius the UI asks for (see CDrawList::ScaledRadius) - 1.0 is
-	// the radius each widget was designed at, 0 squares everything off, and the ceiling is
-	// generous enough to turn small controls into pills. Independent of the toggle above,
-	// which still hard-zeroes every radius: the toggle is the on/off, this is the amount.
+	// the radius each widget was designed at, and 0 squares everything off. This replaced a
+	// separate on/off toggle, which had become a second control for the value this one
+	// already reaches at zero; CStorage still reads that old flag when loading an existing
+	// settings.json, so anyone who had turned corners off keeps square corners.
 	float m_flCornerRoundness = 1.0f;
 
 	// Nominal display units, not literal baked pixels - see CFont's own comment for why

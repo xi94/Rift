@@ -174,7 +174,6 @@ bool CStorage::SaveSettings(const CSettings &settings, std::int32_t carouselZoom
 	j["window_height"] = settings.m_nWindowHeight;
 	j["animations_enabled"] = settings.m_bAnimationsEnabled;
 	j["animation_speed"] = settings.m_flAnimationSpeed;
-	j["rounded_corners_enabled"] = settings.m_bRoundedCornersEnabled;
 	j["corner_roundness"] = settings.m_flCornerRoundness;
 	j["font_pixel_size"] = settings.m_flFontPixelSize;
 	j["secondary_font_pixel_size"] = settings.m_flSecondaryFontPixelSize;
@@ -226,7 +225,6 @@ EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &out
 	settings.m_nWindowHeight = j.value("window_height", settings.m_nWindowHeight);
 	settings.m_bAnimationsEnabled = j.value("animations_enabled", settings.m_bAnimationsEnabled);
 	settings.m_flAnimationSpeed = j.value("animation_speed", settings.m_flAnimationSpeed);
-	settings.m_bRoundedCornersEnabled = j.value("rounded_corners_enabled", settings.m_bRoundedCornersEnabled);
 	settings.m_flFontPixelSize = j.value("font_pixel_size", settings.m_flFontPixelSize);
 	settings.m_flSecondaryFontPixelSize = j.value("secondary_font_pixel_size", settings.m_flSecondaryFontPixelSize);
 
@@ -242,6 +240,13 @@ EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &out
 	settings.m_szFontName[fontNameLength] = '\0';
 
 	settings.m_flCornerRoundness = j.value("corner_roundness", settings.m_flCornerRoundness);
+	// "rounded_corners_enabled" was a separate on/off toggle before the roundness slider
+	// existed, and is no longer written. Honored on read (once - a file saved since carries
+	// corner_roundness and no longer carries this) so an install that had corners switched
+	// off doesn't silently get them back on upgrade.
+	if (!j.value("rounded_corners_enabled", true)) {
+		settings.m_flCornerRoundness = 0.0f;
+	}
 	settings.m_bExcludeAccountListFromCapture =
 		j.value("exclude_account_list_from_capture", settings.m_bExcludeAccountListFromCapture);
 	// "minimize_to_tray" is what this setting was called back when it hooked minimize
