@@ -11,6 +11,15 @@
 namespace {
 const wchar_t *const kWindowClassName = L"rift_window_class";
 
+// Posted by a second instance to the running one - see CWindow::ActivateExistingInstance. A
+// registered message rather than WM_APP+n so it can never collide with anything else this
+// window handles.
+UINT ActivateInstanceMessage()
+{
+	static const UINT message = RegisterWindowMessageW(L"RiftActivateExistingInstance");
+	return message;
+}
+
 // physical client-area pixels -> logical pixels (see CWindow::GetDpiScale).
 float ToLogical(float physical, float dpiScale)
 {
@@ -229,6 +238,30 @@ void CWindow::Restore()
 	SetForegroundWindow(m_hWnd);
 }
 
+bool CWindow::ActivateExistingInstance(std::uint32_t timeoutMs)
+{
+	const DWORD deadline = GetTickCount() + timeoutMs;
+	for (;;) {
+		const HWND hWnd = FindWindowW(kWindowClassName, nullptr);
+		if (hWnd != nullptr) {
+			// The running instance is in the background and would otherwise be refused the
+			// foreground; this process is the one the user just launched, so it holds the
+			// right to hand that over.
+			DWORD processId = 0;
+			GetWindowThreadProcessId(hWnd, &processId);
+			if (processId != 0) {
+				AllowSetForegroundWindow(processId);
+			}
+			PostMessageW(hWnd, ActivateInstanceMessage(), 0, 0);
+			return true;
+		}
+		if (GetTickCount() >= deadline) {
+			return false;
+		}
+		Sleep(100);
+	}
+}
+
 void CWindow::SetResizeCallback(ResizeCallback callback, void *pUserData)
 {
 	m_pResizeCallback = callback;
@@ -339,6 +372,11 @@ void CWindow::PushInputEvent(const InputEvent &event)
 // input is polled everywhere except those two cases.
 LRESULT CWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
+	if (message == ActivateInstanceMessage()) {
+		Restore();
+		return 0;
+	}
+
 	switch (message) {
 		// Removes the standard title bar/frame entirely (client rect = window rect) so we
 		// can draw our own. Must handle both wParam cases: TRUE (lParam is

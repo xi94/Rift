@@ -359,6 +359,22 @@ int main(int argc, char *argv[])
 		std::println("Diagnostic log: {}", DebugLog::GetFilePath());
 	}
 
+	// Only one Rift at a time: a second launch hands the running instance the foreground -
+	// including one hidden in the tray, which is otherwise easy to forget is running at all -
+	// and exits. The mutex, not a window lookup, is what decides: an instance still starting
+	// up has no window yet, and two launches racing would both conclude they were first.
+	// Deliberately after the crash handler and the log so a duplicate launch still says so
+	// (to the console and the debugger - it can't open the running instance's log file, which
+	// is held deny-write, and so can't disturb it either), and after the updater's own
+	// recovery pass, which exits before reaching this at all.
+	const HANDLE hInstanceMutex = CreateMutexW(nullptr, TRUE, L"Local\\Rift.SingleInstance");
+	if (hInstanceMutex != nullptr && GetLastError() == ERROR_ALREADY_EXISTS) {
+		const bool activated = CWindow::ActivateExistingInstance();
+		DebugLog::Write("app", "another Rift is already running (%s) - exiting",
+						activated ? "brought it to the front" : "it never answered");
+		return 0;
+	}
+
 	// Before the first login attempt ever creates one - holds this process's multi-threaded
 	// apartment open so the per-attempt CoInitializeEx/CoUninitialize pairs stop building and
 	// tearing down the whole apartment (and UI Automation's state inside it) every time. See
@@ -915,6 +931,13 @@ int main(int argc, char *argv[])
 		// CRendererD3D11's own GPU-resource release order) still runs.
 		if (updater.ConsumeReadyToRelaunch()) {
 			SaveNow(*pCarousel, settings, masterKey);
+
+			// Released and closed before spawning the replacement, or the new build would see
+			// this still-running process's mutex and exit as a duplicate instead of updating.
+			if (hInstanceMutex != nullptr) {
+				ReleaseMutex(hInstanceMutex);
+				CloseHandle(hInstanceMutex);
+			}
 
 			wchar_t exePath[MAX_PATH];
 			if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) > 0) {

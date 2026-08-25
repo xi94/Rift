@@ -224,6 +224,13 @@ class CWindow {
 	// Undoes a minimize-to-tray hide, or an ordinary minimize.
 	void Restore();
 
+	// Asks an already-running Rift to show itself, for a second instance to call before
+	// bowing out. Returns false if none answered within timeoutMs - the wait exists because
+	// the running instance may still be starting up and have no window yet, and a
+	// double-click during that window should still surface it rather than silently do
+	// nothing. Static: the caller has no CWindow of its own and must not create one.
+	static bool ActivateExistingInstance(std::uint32_t timeoutMs = 3000);
+
   private:
 	static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 	LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
