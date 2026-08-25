@@ -93,6 +93,13 @@ constexpr float kSliderValueLabelWidth = 48.0f;
 constexpr float kAnimationSpeedMin = 0.25f;
 constexpr float kAnimationSpeedMax = 3.0f;
 
+// 1.0 is the radius every widget in this project was drawn at; 0 squares everything off,
+// and the ceiling is deliberately past 1 so small controls can be pushed all the way to
+// pills. The rounded-rect builder clamps a radius against the shape's own size, so the top
+// of this range can't produce a self-intersecting corner.
+constexpr float kCornerRoundnessMin = 0.0f;
+constexpr float kCornerRoundnessMax = 2.0f;
+
 // Nominal Settings-facing units, not literal baked pixels - CFontManager's display-
 // scale factor is what turns a value here into the real pixel height stb_truetype
 // bakes.
@@ -386,6 +393,16 @@ float AnimationSpeedFromT(float t)
 	return kAnimationSpeedMin + std::clamp(t, 0.0f, 1.0f) * (kAnimationSpeedMax - kAnimationSpeedMin);
 }
 
+float CornerRoundnessToT(float roundness)
+{
+	return std::clamp((roundness - kCornerRoundnessMin) / (kCornerRoundnessMax - kCornerRoundnessMin), 0.0f, 1.0f);
+}
+
+float CornerRoundnessFromT(float t)
+{
+	return kCornerRoundnessMin + std::clamp(t, 0.0f, 1.0f) * (kCornerRoundnessMax - kCornerRoundnessMin);
+}
+
 // Every row's rect, built by walking a single RectSplitTop cursor down the scroll
 // region - each row claims exactly the height it needs and the next one starts
 // exactly where it ended, so rows can never overlap or get squeezed regardless of how
@@ -400,6 +417,7 @@ struct SettingsRows {
 	Rect SecondaryFontSize;
 	Rect Accent;
 	Rect RoundedCorners;
+	Rect CornerRoundness;
 	Rect SectionMotion;
 	Rect Animations;
 	Rect AnimationSpeed;
@@ -436,6 +454,7 @@ SettingsRows ComputeRows(Rect scrollRegion, float scrollOffset, const CFontManag
 	rows.SecondaryFontSize = RectSplitTop(cursor, rowHeight);
 	rows.Accent = RectSplitTop(cursor, rowHeight);
 	rows.RoundedCorners = RectSplitTop(cursor, rowHeight);
+	rows.CornerRoundness = RectSplitTop(cursor, rowHeight);
 
 	rows.SectionMotion = RectSplitTop(cursor, sectionHeight);
 	rows.Animations = RectSplitTop(cursor, rowHeight);
@@ -469,6 +488,8 @@ Rect ResetTargetRowRect(const SettingsRows &rows, ESettingsResetTarget target)
 			return rows.Accent;
 		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
 			return rows.RoundedCorners;
+		case ESettingsResetTarget::SETTINGS_RESET_CORNER_ROUNDNESS:
+			return rows.CornerRoundness;
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
 			return rows.Animations;
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATION_SPEED:
@@ -497,6 +518,8 @@ Rect ResetTargetControlRect(const SettingsRows &rows, ESettingsResetTarget targe
 			return SwatchRect(rows.Accent, fonts);
 		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
 			return ToggleRect(rows.RoundedCorners, fonts);
+		case ESettingsResetTarget::SETTINGS_RESET_CORNER_ROUNDNESS:
+			return SliderControlRect(rows.CornerRoundness, fonts);
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
 			return ToggleRect(rows.Animations, fonts);
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATION_SPEED:
@@ -645,14 +668,16 @@ void DrawToggle(CDrawList &drawList, Rect rect, float onAmount, Color accent, st
 								  ColorFadeAlpha(Color{245, 245, 248, 255}, alpha));
 }
 
-// track is the slider's hit rect (SliderTrackRect) - value's label ("1.35x") is drawn
-// to its left in reserved space so it never crowds the track regardless of digit
-// count, same reasoning DrawStepper's centered value text uses.
-void DrawSlider(CDrawList &drawList, const CFont &font, Rect track, float value, Color accent, std::uint8_t alpha)
+// track is the slider's hit rect (SliderTrackRect); t is where the thumb sits (0..1) and
+// valueText is the readout drawn to its left in reserved space, so it never crowds the
+// track regardless of digit count - same reasoning DrawStepper's centered value text uses.
+// Both are passed in rather than derived here, because the two sliders this serves measure
+// different things ("1.35x" of speed, "120%" of roundness) and neither range belongs in a
+// drawing function.
+void DrawSlider(CDrawList &drawList, const CFont &font, Rect track, float t, CStringView valueText, Color accent,
+				std::uint8_t alpha)
 {
-	char buffer[8];
-	const int written = std::snprintf(buffer, sizeof(buffer), "%.2fx", value);
-	const CStringView text{buffer, written > 0 ? static_cast<std::uint64_t>(written) : 0};
+	const CStringView text = valueText;
 	const float textW = TextWidth(font, text);
 	// Baseline centered on the track's own vertical center via the same ascent+descent
 	// formula every other correctly-centered label in this project uses (see e.g.
@@ -670,8 +695,7 @@ void DrawSlider(CDrawList &drawList, const CFont &font, Rect track, float value,
 								  CDrawList::UniformRadii(kSliderTrackVisualHeight * 0.5f),
 								  ColorFadeAlpha(kColorToggleOff, alpha));
 
-	const float t = AnimationSpeedToT(value);
-	const float fillW = track.W * t;
+	const float fillW = track.W * std::clamp(t, 0.0f, 1.0f);
 	if (fillW > 0.0f) {
 		drawList.AddRectRoundedFilled(track.X, barY, fillW, kSliderTrackVisualHeight,
 									  CDrawList::UniformRadii(kSliderTrackVisualHeight * 0.5f),
@@ -748,6 +772,7 @@ CSettingsPanel::CSettingsPanel(CFontManager &fonts, CSettings &settings, CWindow
 	m_flFontSizeDisplay = m_settings.m_flFontPixelSize;
 	m_flSecondaryFontSizeDisplay = m_settings.m_flSecondaryFontPixelSize;
 	m_flAnimationSpeedDisplay = m_settings.m_flAnimationSpeed;
+	m_flCornerRoundnessDisplay = m_settings.m_flCornerRoundness;
 	m_flAccentDisplayR = static_cast<float>(m_settings.m_clrAccent.R);
 	m_flAccentDisplayG = static_cast<float>(m_settings.m_clrAccent.G);
 	m_flAccentDisplayB = static_cast<float>(m_settings.m_clrAccent.B);
@@ -782,6 +807,8 @@ bool CSettingsPanel::IsTargetAtDefault(ESettingsResetTarget target) const
 				   m_settings.m_clrAccent.A == defaults.m_clrAccent.A;
 		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
 			return m_settings.m_bRoundedCornersEnabled == defaults.m_bRoundedCornersEnabled;
+		case ESettingsResetTarget::SETTINGS_RESET_CORNER_ROUNDNESS:
+			return std::fabs(m_settings.m_flCornerRoundness - defaults.m_flCornerRoundness) < kEpsilon;
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
 			return m_settings.m_bAnimationsEnabled == defaults.m_bAnimationsEnabled;
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATION_SPEED:
@@ -835,6 +862,10 @@ void CSettingsPanel::ResetTargetToDefault(ESettingsResetTarget target)
 		case ESettingsResetTarget::SETTINGS_RESET_ROUNDED_CORNERS:
 			m_settings.m_bRoundedCornersEnabled = defaults.m_bRoundedCornersEnabled;
 			CDrawList::SetRoundedCornersEnabled(m_settings.m_bRoundedCornersEnabled);
+			break;
+		case ESettingsResetTarget::SETTINGS_RESET_CORNER_ROUNDNESS:
+			m_settings.m_flCornerRoundness = defaults.m_flCornerRoundness;
+			CDrawList::SetCornerRoundnessScale(m_settings.m_flCornerRoundness);
 			break;
 		case ESettingsResetTarget::SETTINGS_RESET_ANIMATIONS:
 			m_settings.m_bAnimationsEnabled = defaults.m_bAnimationsEnabled;
@@ -905,6 +936,12 @@ void CSettingsPanel::Update(float deltaSeconds)
 	} else {
 		m_flAnimationSpeedDisplay = CAnimator::EaseToward(m_flAnimationSpeedDisplay, m_settings.m_flAnimationSpeed,
 														  kValueEaseRate, deltaSeconds);
+	}
+	if (m_cornerRoundnessDrag.IsPressed()) {
+		m_flCornerRoundnessDisplay = m_settings.m_flCornerRoundness;
+	} else {
+		m_flCornerRoundnessDisplay = CAnimator::EaseToward(m_flCornerRoundnessDisplay, m_settings.m_flCornerRoundness,
+														   kValueEaseRate, deltaSeconds);
 	}
 	m_flAccentDisplayR = CAnimator::EaseToward(m_flAccentDisplayR, static_cast<float>(m_settings.m_clrAccent.R),
 											   kValueEaseRate, deltaSeconds);
@@ -992,6 +1029,16 @@ bool CSettingsPanel::OnPointerDown(float x, float y)
 		}
 	}
 
+	if (RowInView(rows.CornerRoundness, layout.ScrollRegion)) {
+		const Rect slider = SliderTrackRect(rows.CornerRoundness, m_fonts);
+		if (RectContainsPoint(slider, x, y)) {
+			m_cornerRoundnessDrag.Begin(x, y);
+			m_settings.m_flCornerRoundness = CornerRoundnessFromT((x - slider.X) / slider.W);
+			CDrawList::SetCornerRoundnessScale(m_settings.m_flCornerRoundness);
+			return true;
+		}
+	}
+
 	return true; // swallow every press while open, matching the original's blocking behavior
 }
 
@@ -1021,6 +1068,15 @@ bool CSettingsPanel::OnPointerMove(float x, float y)
 		CAnimator::SetSpeed(m_settings.m_flAnimationSpeed);
 	}
 
+	if (m_cornerRoundnessDrag.IsPressed()) {
+		m_cornerRoundnessDrag.Update(x, y);
+		const Rect slider = SliderTrackRect(rows.CornerRoundness, m_fonts);
+		m_settings.m_flCornerRoundness = CornerRoundnessFromT((x - slider.X) / slider.W);
+		// Applied live while dragging, like every other setting here - the whole UI rounds
+		// off under the cursor, which is the only useful way to pick this value.
+		CDrawList::SetCornerRoundnessScale(m_settings.m_flCornerRoundness);
+	}
+
 	return true;
 }
 
@@ -1036,8 +1092,9 @@ bool CSettingsPanel::OnPointerUp(float x, float y)
 	const bool wasDraggingColor = m_colorPicker.IsDragging();
 	m_colorPicker.OnPointerUp(x, y);
 
-	const bool wasDraggingSlider = m_animationSpeedDrag.IsPressed();
+	const bool wasDraggingSlider = m_animationSpeedDrag.IsPressed() || m_cornerRoundnessDrag.IsPressed();
 	m_animationSpeedDrag.End();
+	m_cornerRoundnessDrag.End();
 
 	if (wasDraggingScrollbar || wasDraggingColor || wasDraggingSlider) {
 		return true;
@@ -1052,7 +1109,8 @@ ECursorKind CSettingsPanel::GetDesiredCursor() const
 		return ECursorKind::CURSOR_ARROW;
 	}
 
-	if (m_rowsScroll.IsDragging() || m_colorPicker.IsDragging() || m_animationSpeedDrag.IsPressed()) {
+	if (m_rowsScroll.IsDragging() || m_colorPicker.IsDragging() || m_animationSpeedDrag.IsPressed() ||
+		m_cornerRoundnessDrag.IsPressed()) {
 		return ECursorKind::CURSOR_DRAG;
 	}
 
@@ -1126,6 +1184,10 @@ ECursorKind CSettingsPanel::GetDesiredCursor() const
 	}
 	if (RowInView(rows.AnimationSpeed, layout.ScrollRegion) &&
 		RectContainsPoint(SliderTrackRect(rows.AnimationSpeed, m_fonts), m_flMouseX, m_flMouseY)) {
+		return ECursorKind::CURSOR_HAND;
+	}
+	if (RowInView(rows.CornerRoundness, layout.ScrollRegion) &&
+		RectContainsPoint(SliderTrackRect(rows.CornerRoundness, m_fonts), m_flMouseX, m_flMouseY)) {
 		return ECursorKind::CURSOR_HAND;
 	}
 	if (RowInView(rows.Accent, layout.ScrollRegion) &&
@@ -1385,9 +1447,10 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 	// The hovered row's band, painted before any row content so every label and control
 	// lands on top of it. Deliberately not eased: a highlight that fades behind a moving
 	// cursor trails the thing it's supposed to be marking.
-	const Rect hoverableRows[]{rows.Font,			rows.FontSize,		rows.SecondaryFontSize, rows.Accent,
-							   rows.RoundedCorners, rows.Animations,	rows.AnimationSpeed,	rows.ExcludeFromCapture,
-							   rows.CloseToTray,	rows.MasterPassword};
+	const Rect hoverableRows[]{rows.CornerRoundness,   rows.Font,			rows.FontSize,
+							   rows.SecondaryFontSize, rows.Accent,			rows.RoundedCorners,
+							   rows.Animations,		   rows.AnimationSpeed, rows.ExcludeFromCapture,
+							   rows.CloseToTray,	   rows.MasterPassword};
 	if (IsBlocking() && !m_colorPicker.IsBlocking() && RectContainsPoint(layout.ScrollRegion, m_flMouseX, m_flMouseY)) {
 		for (const Rect &row : hoverableRows) {
 			if (RowInView(row, layout.ScrollRegion) && RectContainsPoint(row, m_flMouseX, m_flMouseY)) {
@@ -1465,6 +1528,23 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 				   m_settings.m_clrAccent, alpha);
 	}
 
+	if (RowInView(rows.CornerRoundness, layout.ScrollRegion)) {
+		DrawRowLabel(
+			drawList, m_fonts, rows.CornerRoundness, "Corner Roundness", "How round those corners actually are.",
+			LabelRightEdge(SliderControlRect(rows.CornerRoundness, m_fonts), rows.CornerRoundness, m_fonts), alpha);
+		// A percentage, not a multiplier: this scales a length nobody knows the pixel value
+		// of, so "120%" says everything "1.20x" would and reads as a proportion of the
+		// design's own rounding, which is exactly what it is.
+		char roundnessBuffer[8];
+		const int roundnessWritten =
+			std::snprintf(roundnessBuffer, sizeof(roundnessBuffer), "%.0f%%", m_flCornerRoundnessDisplay * 100.0f);
+		DrawSlider(
+			drawList, body, SliderTrackRect(rows.CornerRoundness, m_fonts),
+			CornerRoundnessToT(m_flCornerRoundnessDisplay),
+			CStringView{roundnessBuffer, roundnessWritten > 0 ? static_cast<std::uint64_t>(roundnessWritten) : 0},
+			m_settings.m_clrAccent, alpha);
+	}
+
 	if (RowInView(rows.CloseToTray, layout.ScrollRegion)) {
 		DrawRowLabel(drawList, m_fonts, rows.CloseToTray, "Close To Tray",
 					 "Closing hides Rift to the system tray instead of quitting.",
@@ -1478,7 +1558,11 @@ void CSettingsPanel::Draw(CDrawList &drawList)
 					 "How fast popups, scrolling, and toggles animate.",
 					 LabelRightEdge(SliderControlRect(rows.AnimationSpeed, m_fonts), rows.AnimationSpeed, m_fonts),
 					 alpha);
-		DrawSlider(drawList, body, SliderTrackRect(rows.AnimationSpeed, m_fonts), m_flAnimationSpeedDisplay,
+		char speedBuffer[8];
+		const int speedWritten = std::snprintf(speedBuffer, sizeof(speedBuffer), "%.2fx", m_flAnimationSpeedDisplay);
+		DrawSlider(drawList, body, SliderTrackRect(rows.AnimationSpeed, m_fonts),
+				   AnimationSpeedToT(m_flAnimationSpeedDisplay),
+				   CStringView{speedBuffer, speedWritten > 0 ? static_cast<std::uint64_t>(speedWritten) : 0},
 				   m_settings.m_clrAccent, alpha);
 	}
 

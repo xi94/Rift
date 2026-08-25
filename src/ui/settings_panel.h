@@ -76,6 +76,7 @@ enum class ESettingsResetTarget : std::uint8_t {
 	SETTINGS_RESET_SECONDARY_FONT_SIZE,
 	SETTINGS_RESET_ACCENT,
 	SETTINGS_RESET_ROUNDED_CORNERS,
+	SETTINGS_RESET_CORNER_ROUNDNESS,
 	SETTINGS_RESET_ANIMATIONS,
 	SETTINGS_RESET_ANIMATION_SPEED,
 	SETTINGS_RESET_EXCLUDE_FROM_CAPTURE,
@@ -201,6 +202,7 @@ class CSettingsPanel : public CWidget {
 	float m_flFontSizeDisplay = 0.0f;
 	float m_flSecondaryFontSizeDisplay = 0.0f;
 	float m_flAnimationSpeedDisplay = 0.0f;
+	float m_flCornerRoundnessDisplay = 0.0f;
 	float m_flAccentDisplayR = 0.0f;
 	float m_flAccentDisplayG = 0.0f;
 	float m_flAccentDisplayB = 0.0f;
@@ -232,6 +234,11 @@ class CSettingsPanel : public CWidget {
 	// bool, though (like CColorPicker) HasMoved() is never read - a plain click on the
 	// track should still jump the value there immediately.
 	CDraggable m_animationSpeedDrag;
+
+	// The Corner Roundness slider's own drag, tracked separately from the Animation Speed
+	// one above rather than as a shared "some slider is being dragged" flag - two sliders
+	// sharing one CDraggable would let a drag started on either continue over the other.
+	CDraggable m_cornerRoundnessDrag;
 
 	bool m_bResetPasswordRequestedThisFrame = false;
 };

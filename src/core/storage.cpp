@@ -88,7 +88,7 @@ bool HexToBytes(const std::string &hex, std::uint8_t *pOut, std::size_t outLengt
 	}
 	std::size_t decodedLength = 0;
 	return sodium_hex2bin(pOut, outLength, hex.c_str(), hex.size(), nullptr, &decodedLength, nullptr) == 0 &&
-		  decodedLength == outLength;
+		   decodedLength == outLength;
 }
 
 std::string BytesToBase64(const std::uint8_t *pData, std::size_t length)
@@ -175,6 +175,7 @@ bool CStorage::SaveSettings(const CSettings &settings, std::int32_t carouselZoom
 	j["animations_enabled"] = settings.m_bAnimationsEnabled;
 	j["animation_speed"] = settings.m_flAnimationSpeed;
 	j["rounded_corners_enabled"] = settings.m_bRoundedCornersEnabled;
+	j["corner_roundness"] = settings.m_flCornerRoundness;
 	j["font_pixel_size"] = settings.m_flFontPixelSize;
 	j["secondary_font_pixel_size"] = settings.m_flSecondaryFontPixelSize;
 	j["accent_color"] = {settings.m_clrAccent.R, settings.m_clrAccent.G, settings.m_clrAccent.B,
@@ -236,18 +237,17 @@ EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &out
 	}
 
 	const std::string fontName = j.value("font_name", std::string(settings.m_szFontName));
-	const std::uint64_t fontNameLength =
-		std::min<std::uint64_t>(fontName.size(), sizeof(settings.m_szFontName) - 1);
+	const std::uint64_t fontNameLength = std::min<std::uint64_t>(fontName.size(), sizeof(settings.m_szFontName) - 1);
 	std::memcpy(settings.m_szFontName, fontName.data(), fontNameLength);
 	settings.m_szFontName[fontNameLength] = '\0';
 
+	settings.m_flCornerRoundness = j.value("corner_roundness", settings.m_flCornerRoundness);
 	settings.m_bExcludeAccountListFromCapture =
 		j.value("exclude_account_list_from_capture", settings.m_bExcludeAccountListFromCapture);
 	// "minimize_to_tray" is what this setting was called back when it hooked minimize
 	// rather than close - read as the fallback so an existing settings.json keeps the
 	// user's choice instead of silently reverting to the default.
-	settings.m_bCloseToTray =
-		j.value("close_to_tray", j.value("minimize_to_tray", settings.m_bCloseToTray));
+	settings.m_bCloseToTray = j.value("close_to_tray", j.value("minimize_to_tray", settings.m_bCloseToTray));
 	outCarouselZoomStop = j.value("carousel_zoom_stop", outCarouselZoomStop);
 	outCarouselSelectedBanner = j.value("carousel_selected_banner", outCarouselSelectedBanner);
 
@@ -256,11 +256,11 @@ EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &out
 		const nlohmann::json &mp = j["master_password"];
 		settings.m_bMasterPasswordEnabled = mp.value("enabled", false);
 		HexToBytes(mp.value("salt_hex", std::string()), settings.m_aMasterPasswordSalt,
-				  sizeof(settings.m_aMasterPasswordSalt));
+				   sizeof(settings.m_aMasterPasswordSalt));
 		HexToBytes(mp.value("wrap_nonce_hex", std::string()), settings.m_aMasterPasswordWrapNonce,
-				  sizeof(settings.m_aMasterPasswordWrapNonce));
+				   sizeof(settings.m_aMasterPasswordWrapNonce));
 		HexToBytes(mp.value("wrapped_dek_hex", std::string()), settings.m_aMasterPasswordWrappedDek,
-				  sizeof(settings.m_aMasterPasswordWrappedDek));
+				   sizeof(settings.m_aMasterPasswordWrappedDek));
 		settings.m_masterPasswordOpsLimit = mp.value("ops_limit", static_cast<std::uint64_t>(0));
 		settings.m_masterPasswordMemLimit =
 			static_cast<std::size_t>(mp.value("mem_limit", static_cast<std::uint64_t>(0)));
@@ -270,7 +270,7 @@ EStorageLoadResult CStorage::LoadSettings(CSettings &settings, std::int32_t &out
 }
 
 bool CStorage::SaveAccounts(CBanner *pBanners, std::uint32_t bannerCount, bool masterPasswordEnabled,
-						   const CMasterKey &masterKey)
+							const CMasterKey &masterKey)
 {
 	// Nothing trustworthy to encrypt while locked - accounts.vault is never even read in
 	// that state (see LoadAccounts), so there's nothing real in pBanners to save over it
@@ -324,7 +324,7 @@ bool CStorage::SaveAccounts(CBanner *pBanners, std::uint32_t bannerCount, bool m
 }
 
 EStorageLoadResult CStorage::LoadAccounts(CBanner *pBanners, std::uint32_t bannerCount, bool masterPasswordEnabled,
-										 const CMasterKey &masterKey)
+										  const CMasterKey &masterKey)
 {
 	// The whole point of this format - see storage.h's own "Why accounts.vault waits for
 	// unlock" section: never even attempt to read the file, let alone parse or decrypt it,
@@ -402,8 +402,8 @@ EStorageLoadResult CStorage::LoadAccounts(CBanner *pBanners, std::uint32_t banne
 
 			CAccount &out = pMatch->Accounts[pMatch->AccountCount];
 			out.Init(TruncatedView(username, sizeof(out.m_szUsername) - 1),
-					TruncatedView(note, sizeof(out.m_szNote) - 1),
-					TruncatedView(password, sizeof(out.m_szPassword) - 1));
+					 TruncatedView(note, sizeof(out.m_szNote) - 1),
+					 TruncatedView(password, sizeof(out.m_szPassword) - 1));
 			out.m_uVisibleBannerMask = acc.value("visible_mask", static_cast<std::uint16_t>(0));
 			pMatch->AccountCount += 1;
 		}

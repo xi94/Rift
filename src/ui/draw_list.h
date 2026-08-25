@@ -174,6 +174,14 @@ class CDrawList {
 	static void SetRoundedCornersEnabled(bool enabled);
 	static bool RoundedCornersEnabled();
 
+	// The radius a request for `radius` actually gets: 0 while Round Corners is off, and
+	// otherwise scaled by the Corner Roundness setting. UniformRadii is this applied to all
+	// four corners; the one other caller is the banner glow, whose shader takes a radius
+	// directly rather than a CornerRadii and would otherwise draw a rounded halo around a
+	// square card (or a differently-rounded one) the moment either setting moved.
+	static float ScaledRadius(float radius);
+	static void SetCornerRoundnessScale(float scale);
+
 	// The base solid-fill primitive: every other flat-colored shape here (gradient
 	// corners, the color-picker SV square, glow quads) shares its two-triangle quad
 	// layout, just with different per-vertex colors/UVs/target kind.

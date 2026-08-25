@@ -27,6 +27,12 @@ struct CSettings {
 		1.0f; // multiplier on every eased animation's rate - see CAnimator::SetSpeed. 1.0 = normal speed.
 	bool m_bRoundedCornersEnabled = true;
 
+	// Multiplies every corner radius the UI asks for (see CDrawList::ScaledRadius) - 1.0 is
+	// the radius each widget was designed at, 0 squares everything off, and the ceiling is
+	// generous enough to turn small controls into pills. Independent of the toggle above,
+	// which still hard-zeroes every radius: the toggle is the on/off, this is the amount.
+	float m_flCornerRoundness = 1.0f;
+
 	// Nominal display units, not literal baked pixels - see CFont's own comment for why
 	// the number a user types here isn't 1:1 with what gets baked.
 	float m_flFontPixelSize = 14.0f;

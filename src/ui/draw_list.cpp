@@ -11,6 +11,7 @@ namespace {
 constexpr float kPi = 3.14159265358979323846f;
 
 bool g_bRoundedCornersEnabled = true;
+float g_flCornerRoundnessScale = 1.0f;
 
 // Plain structural equality - Rect has no operator== of its own, and this is only
 // ever used to answer "did the active clip change since the last draw call" below.
@@ -50,9 +51,22 @@ Color ColorFadeAlpha(Color color, std::uint8_t alpha)
 	return Color{color.R, color.G, color.B, static_cast<std::uint8_t>((color.A * alpha) / 255)};
 }
 
+float CDrawList::ScaledRadius(float radius)
+{
+	return g_bRoundedCornersEnabled ? radius * g_flCornerRoundnessScale : 0.0f;
+}
+
+void CDrawList::SetCornerRoundnessScale(float scale)
+{
+	// Negative would flip corners inside out; the rounded-rect builder clamps the upper end
+	// against the shape's own size anyway (see kCornerSegments' comment), so a large scale
+	// just turns a small control into a pill rather than self-intersecting.
+	g_flCornerRoundnessScale = std::max(0.0f, scale);
+}
+
 CornerRadii CDrawList::UniformRadii(float radius)
 {
-	const float r = g_bRoundedCornersEnabled ? radius : 0.0f;
+	const float r = ScaledRadius(radius);
 	return CornerRadii{r, r, r, r};
 }
 
@@ -390,11 +404,10 @@ void CDrawList::AddRectRoundedBannerGlow(float cardX, float cardY, float cardW, 
 	const float h = cardH + glowSize * 2.0f;
 	const CornerRadii radii = UniformRadii(cardCornerRadius + glowSize);
 
-	// UniformRadii already zeroes out when Round Corners is off; mirror that here so the
-	// shader's own rounded-box SDF (which gets the radius separately, not through
-	// CornerRadii) draws a matching square card outline instead of a mismatched rounded
-	// one.
-	const float effectiveCornerRadius = RoundedCornersEnabled() ? cardCornerRadius : 0.0f;
+	// UniformRadii already zeroes and scales; mirror that here so the shader's own
+	// rounded-box SDF (which gets the radius separately, not through CornerRadii) draws a
+	// card outline matching the geometry rather than a differently-rounded one.
+	const float effectiveCornerRadius = ScaledRadius(cardCornerRadius);
 	const BannerGlowParams glow{
 		.QuadWidth = w, .QuadHeight = h, .CornerRadius = effectiveCornerRadius, .RingWidth = glowSize};
 	SetTarget(nullptr, EDrawCommandKind::DRAW_COMMAND_KIND_BANNER_GLOW, glow);

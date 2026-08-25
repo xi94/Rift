@@ -522,6 +522,7 @@ int main(int argc, char *argv[])
 		CAnimator::SetEnabled(settings.m_bAnimationsEnabled);
 		CAnimator::SetSpeed(settings.m_flAnimationSpeed);
 		CDrawList::SetRoundedCornersEnabled(settings.m_bRoundedCornersEnabled);
+		CDrawList::SetCornerRoundnessScale(settings.m_flCornerRoundness);
 		fonts.ApplyBody(renderer, StringViewFromCString(settings.m_szFontName), settings.m_flFontPixelSize,
 						settings.m_flSecondaryFontPixelSize, window.GetDpiScale());
 	}
