@@ -10,9 +10,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include "core/debug_log.h"
 #include "core/thread_util.h"
 
 namespace {
+// Every diagnostic line out of this file shares one category tag - see core/debug_log.h.
+constexpr const char *kLogCategory = "riot";
+
 constexpr const char *kInstallsJsonPath = "C:\\ProgramData\\Riot Games\\RiotClientInstalls.json";
 constexpr const char *kExecutablePathKey = "rc_default";
 
@@ -93,6 +97,28 @@ bool AnyProcessNameMatches(const wchar_t *const *pNames, std::size_t nameCount)
 	return found;
 }
 
+// Describes a found window the way a log reader needs it: which process and thread actually
+// own it. A window whose owning process id isn't the one Launch() started is the signature of
+// having latched onto a dying client's about-to-vanish HWND (see KillProcessesByName's own
+// comment), which is worth being able to see rather than infer.
+void LogWindowIdentity(const char *pWhat, HWND hWnd)
+{
+	if (!DebugLog::IsEnabled()) {
+		return;
+	}
+	if (hWnd == nullptr) {
+		DebugLog::Write(kLogCategory, "%s: no client window found", pWhat);
+		return;
+	}
+
+	DWORD processId = 0;
+	const DWORD threadId = GetWindowThreadProcessId(hWnd, &processId);
+	wchar_t title[128]{};
+	GetWindowTextW(hWnd, title, ARRAYSIZE(title));
+	DebugLog::Write(kLogCategory, "%s: hwnd=0x%p owned by pid %lu / thread t%lu, title \"%ls\"", pWhat, hWnd,
+					processId, threadId, title);
+}
+
 // How long KillProcessesByName gives the processes it terminated to actually be gone before it
 // stops waiting and lets the caller carry on regardless. Generous: a Riot Client tree normally
 // unwinds in well under this, and the cost of being wrong in the other direction (see that
@@ -110,6 +136,7 @@ void WaitForProcessesToExit(std::vector<HANDLE> &processes, std::chrono::millise
 	// a gpu-process and a crashpad-handler of its own, and League's lobby client does the same),
 	// so this waits in batches - all against the one deadline computed above, rather than
 	// handing each batch its own full timeout.
+	bool bTimedOut = false;
 	for (std::size_t offset = 0; offset < processes.size(); offset += MAXIMUM_WAIT_OBJECTS) {
 		const DWORD count =
 			static_cast<DWORD>(std::min<std::size_t>(MAXIMUM_WAIT_OBJECTS, processes.size() - offset));
@@ -118,7 +145,13 @@ void WaitForProcessesToExit(std::vector<HANDLE> &processes, std::chrono::millise
 			now >= deadline
 				? 0
 				: static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
-		WaitForMultipleObjects(count, processes.data() + offset, TRUE, remainingMs);
+		bTimedOut =
+			WaitForMultipleObjects(count, processes.data() + offset, TRUE, remainingMs) == WAIT_TIMEOUT || bTimedOut;
+	}
+	if (bTimedOut) {
+		// The caller is about to Launch() into a client that hasn't finished dying - see
+		// KillProcessesByName's own comment for exactly what that races with.
+		DebugLog::Write(kLogCategory, "TIMED OUT waiting for killed processes to exit - launching anyway");
 	}
 
 	for (const HANDLE process : processes) {
@@ -164,15 +197,21 @@ void KillProcessesByName(const wchar_t *const *pNames, std::size_t nameCount)
 				continue;
 			}
 			if (TerminateProcess(process, 0)) {
+				DebugLog::Write(kLogCategory, "terminated %ls (pid %lu)", entry.szExeFile, entry.th32ProcessID);
 				terminated.push_back(process); // WaitForProcessesToExit closes it
 			} else {
+				DebugLog::Write(kLogCategory, "TerminateProcess FAILED for %ls (pid %lu), err=%lu", entry.szExeFile,
+								entry.th32ProcessID, GetLastError());
 				CloseHandle(process);
 			}
 		} while (Process32NextW(snapshot, &entry));
 	}
 	CloseHandle(snapshot);
 
+	const DebugLog::CScope scope(kLogCategory, "wait for %zu killed client process(es) to exit", terminated.size());
 	WaitForProcessesToExit(terminated, kProcessExitTimeout);
+	DebugLog::Write(kLogCategory, "killed client processes gone after %llums",
+					static_cast<unsigned long long>(scope.ElapsedMs()));
 }
 
 // UTF-8 (this project's own string convention - see core/string_view.h) -> UTF-16, the one the
@@ -212,6 +251,7 @@ constexpr std::uint32_t kResponsiveProbeTimeoutMs = 750;
 // first is what keeps a slow client slow instead of wedging us.
 bool IsWindowResponsive(HWND hWnd, std::uint32_t timeoutMs)
 {
+	const DebugLog::CScope scope(kLogCategory, "WM_NULL responsiveness probe (hwnd=0x%p)", hWnd);
 	DWORD_PTR probeResult = 0;
 	return SendMessageTimeoutW(hWnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, timeoutMs, &probeResult) != 0;
 }
@@ -234,18 +274,27 @@ class ScopedThreadInputAttach {
 	explicit ScopedThreadInputAttach(HWND hWnd)
 	{
 		if (!IsWindowResponsive(hWnd, kResponsiveProbeTimeoutMs)) {
+			DebugLog::Write(kLogCategory, "activation: target window is not pumping - skipping AttachThreadInput");
 			return;
 		}
 		m_targetThreadId = GetWindowThreadProcessId(hWnd, nullptr);
 		m_currentThreadId = GetCurrentThreadId();
 		if (m_targetThreadId != 0 && m_targetThreadId != m_currentThreadId) {
+			const DebugLog::CScope scope(kLogCategory, "AttachThreadInput(TRUE) to t%lu", m_targetThreadId);
 			m_bAttached = AttachThreadInput(m_currentThreadId, m_targetThreadId, TRUE) != 0;
 		}
+		DebugLog::Write(kLogCategory, "activation: input queue %s target thread t%lu",
+						m_bAttached ? "attached to" : "NOT attached to", m_targetThreadId);
 	}
 
 	~ScopedThreadInputAttach()
 	{
 		if (m_bAttached) {
+			// Just as unbounded as the attach - and once the queues are shared, a target that
+			// wedged after the attach succeeded hangs this detach just as solidly. Running on
+			// a thread nothing needs back is what makes that survivable; a breadcrumb that
+			// never closes is what makes it visible.
+			const DebugLog::CScope scope(kLogCategory, "AttachThreadInput(FALSE) from t%lu", m_targetThreadId);
 			AttachThreadInput(m_currentThreadId, m_targetThreadId, FALSE);
 		}
 	}
@@ -275,16 +324,26 @@ constexpr auto kActivateTimeout = std::chrono::milliseconds(3000);
 // round trip for no coverage the two documented calls don't already give.
 void ActivateWindowNow(HWND hWnd, bool bAlsoFocus)
 {
+	// Each call gets its own breadcrumb rather than one around the lot, so the log from a
+	// wedged pass names the exact call that never came back instead of just "activation".
 	const ScopedThreadInputAttach attach(hWnd);
 
 	if (IsIconic(hWnd)) {
+		const DebugLog::CScope scope(kLogCategory, "ShowWindow(SW_RESTORE)");
 		ShowWindow(hWnd, SW_RESTORE);
 	}
-	SetForegroundWindow(hWnd);
-	BringWindowToTop(hWnd);
+	{
+		const DebugLog::CScope scope(kLogCategory, "SetForegroundWindow");
+		SetForegroundWindow(hWnd);
+	}
+	{
+		const DebugLog::CScope scope(kLogCategory, "BringWindowToTop");
+		BringWindowToTop(hWnd);
+	}
 	if (bAlsoFocus) {
 		// Only meaningful while the attach above is still in effect - SetFocus aimed at another
 		// thread's window does nothing at all otherwise.
+		const DebugLog::CScope scope(kLogCategory, "SetFocus");
 		SetFocus(hWnd);
 	}
 }
@@ -296,7 +355,16 @@ void ActivateWindowNow(HWND hWnd, bool bAlsoFocus)
 // can ever get it back.
 bool ActivateWindowBounded(HWND hWnd, bool bAlsoFocus)
 {
-	return RunBoundedOrAbandon([hWnd, bAlsoFocus]() { ActivateWindowNow(hWnd, bAlsoFocus); }, kActivateTimeout);
+	DebugLog::Write(kLogCategory, "activation pass starting (hwnd=0x%p, focus=%s)", hWnd, bAlsoFocus ? "yes" : "no");
+	const bool bCompleted =
+		RunBoundedOrAbandon([hWnd, bAlsoFocus]() { ActivateWindowNow(hWnd, bAlsoFocus); }, kActivateTimeout);
+	// An abandoned pass leaves a thread of this process permanently parked inside the client's
+	// own window procedure - and, if it got that far, permanently attached to the client's
+	// input queue. Both are tolerated by design (see this function's own comment), but a run
+	// where this reports ABANDONED is a run whose later steps are already on thin ice.
+	DebugLog::Write(kLogCategory, "activation pass %s",
+					bCompleted ? "completed" : "ABANDONED - a thread is stuck in the client's window procedure");
+	return bCompleted;
 }
 
 // Best-effort wait for element to actually receive OS-level keyboard focus after a SetFocus()
@@ -344,11 +412,14 @@ CRiotClient::~CRiotClient()
 
 bool CRiotClient::IsGameInProgress()
 {
-	return AnyProcessNameMatches(kGameProcessNames, ARRAYSIZE(kGameProcessNames));
+	const bool bInProgress = AnyProcessNameMatches(kGameProcessNames, ARRAYSIZE(kGameProcessNames));
+	DebugLog::Write(kLogCategory, "IsGameInProgress -> %s", bInProgress ? "yes" : "no");
+	return bInProgress;
 }
 
 void CRiotClient::KillAllClientProcesses()
 {
+	DebugLog::Write(kLogCategory, "killing every known Riot Client process");
 	KillProcessesByName(kClientProcessNames, ARRAYSIZE(kClientProcessNames));
 }
 
@@ -404,6 +475,7 @@ bool CRiotClient::ResolveExecutablePath()
 			c = L'\\';
 		}
 	}
+	DebugLog::Write(kLogCategory, "resolved Riot Client executable: %ls", m_executablePath.c_str());
 	return !m_executablePath.empty();
 }
 
@@ -429,8 +501,12 @@ bool CRiotClient::Launch(CStringView launchProduct)
 	const BOOL created = CreateProcessW(m_executablePath.c_str(), commandLine.data(), nullptr, nullptr, FALSE, 0,
 										nullptr, nullptr, &startupInfo, &processInfo);
 	if (!created) {
+		DebugLog::Write(kLogCategory, "CreateProcessW FAILED err=%lu for %ls", GetLastError(),
+						m_executablePath.c_str());
 		return false;
 	}
+	DebugLog::Write(kLogCategory, "launched Riot Client pid %lu (%ls)", processInfo.dwProcessId,
+					commandLine.c_str());
 
 	CloseHandle(processInfo.hThread);
 	if (m_hProcess != nullptr) {
@@ -476,14 +552,41 @@ HWND CRiotClient::WaitForResponsiveClientWindow(std::uint32_t timeoutMs,
 	// interruptible rather than becoming a hang the caller can't get out of.
 	const bool bWaitForever = timeoutMs == kWaitForeverMs;
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(bWaitForever ? 0 : timeoutMs);
+	const auto started = std::chrono::steady_clock::now();
+
+	// Deliberately not wrapped in a DebugLog::CScope: this loop legitimately runs for as long
+	// as a cold client takes to start (unbounded, by design - see kWaitForeverMs), so a
+	// watchdog breadcrumb around the whole thing would report "stuck" on every slow-but-normal
+	// launch. The calls inside it carry their own instead, and the progress lines below are
+	// what make a wait that genuinely never ends visible as one.
+	DebugLog::Write(kLogCategory, "waiting for a responsive client window (%s)",
+					bWaitForever ? "no deadline - until cancelled" : "bounded");
+
+	std::uint32_t polls = 0;
+	std::uint32_t nextProgressPoll = 20; // ~2s in at the 100ms interval below, then every ~5s
 	for (;;) {
 		// Both halves every iteration - "exists but not pumping yet" is the normal state for the
 		// first seconds of a cold client start, and the one callers must not act on.
 		const HWND hWnd = FindClientWindow();
 		if (hWnd != nullptr && IsWindowResponsive(hWnd, kResponsiveProbeTimeoutMs)) {
+			LogWindowIdentity("responsive client window", hWnd);
 			return hWnd;
 		}
+
+		polls += 1;
+		if (polls >= nextProgressPoll) {
+			nextProgressPoll = polls + 50;
+			const auto waitedMs =
+				std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started)
+					.count();
+			DebugLog::Write(kLogCategory, "still waiting for a responsive client window after %lldms (%s)",
+							static_cast<long long>(waitedMs),
+							hWnd == nullptr ? "no window yet" : "window exists but is not pumping messages");
+		}
+
 		if (IsCancelled(pCancelRequested) || (!bWaitForever && std::chrono::steady_clock::now() >= deadline)) {
+			DebugLog::Write(kLogCategory, "gave up waiting for a responsive client window (%s)",
+							IsCancelled(pCancelRequested) ? "cancelled" : "timed out");
 			return nullptr;
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -499,6 +602,7 @@ bool CRiotClient::BringToForeground(std::uint32_t timeoutMs, const std::atomic<b
 {
 	const HWND hWnd = WaitForResponsiveClientWindow(timeoutMs, pCancelRequested);
 	if (hWnd == nullptr) {
+		DebugLog::Write(kLogCategory, "BringToForeground: no responsive window to activate");
 		return false;
 	}
 
@@ -509,6 +613,7 @@ bool CRiotClient::SetKeyboardFocus(std::uint32_t timeoutMs, const std::atomic<bo
 {
 	const HWND hWnd = WaitForResponsiveClientWindow(timeoutMs, pCancelRequested);
 	if (hWnd == nullptr) {
+		DebugLog::Write(kLogCategory, "SetKeyboardFocus: no responsive window to focus");
 		return false;
 	}
 
@@ -527,6 +632,8 @@ bool CRiotClient::SubmitLogin(const CUiAutomation &uiAutomation, CStringView use
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
 	CUiElement usernameField;
 	CUiElement passwordField;
+	DebugLog::Write(kLogCategory, "looking for the login form (up to %ums)", timeoutMs);
+	std::uint32_t polls = 0;
 	for (;;) {
 		const CUiElement window = CurrentWindowElement(uiAutomation);
 		if (window.IsValid()) {
@@ -535,10 +642,20 @@ bool CRiotClient::SubmitLogin(const CUiAutomation &uiAutomation, CStringView use
 			passwordField =
 				uiAutomation.FindFirstDescendantByNameAndControlType(window, kPasswordFieldName, UIA_EditControlTypeId);
 			if (usernameField.IsValid() && passwordField.IsValid()) {
+				DebugLog::Write(kLogCategory, "login form found after %u poll(s)", polls);
 				break;
 			}
 		}
+		polls += 1;
 		if (IsCancelled(pCancelRequested) || std::chrono::steady_clock::now() >= deadline) {
+			// Which of the three it was matters: no window at all is a launch/kill problem, a
+			// window without the fields is usually an already-logged-in client (the homepage
+			// has no login form) or a UI Automation tree that never came up.
+			DebugLog::Write(kLogCategory, "login form NOT found after %u poll(s) (%s; window %s, username %s, "
+										  "password %s)",
+							polls, IsCancelled(pCancelRequested) ? "cancelled" : "timed out",
+							CurrentWindowElement(uiAutomation).IsValid() ? "yes" : "no",
+							usernameField.IsValid() ? "yes" : "no", passwordField.IsValid() ? "yes" : "no");
 			return false;
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -555,6 +672,8 @@ bool CRiotClient::SubmitLogin(const CUiAutomation &uiAutomation, CStringView use
 	// could silently do nothing if the focus change hadn't actually landed yet.
 	passwordField.SetFocus();
 	WaitForKeyboardFocus(passwordField, 500);
+	DebugLog::Write(kLogCategory, "submitting the login form (password field %s real keyboard focus)",
+					passwordField.HasKeyboardFocus() ? "has" : "does NOT have");
 	uiAutomation.SendKey(VK_RETURN);
 	return true;
 }
@@ -588,15 +707,22 @@ bool CRiotClient::WaitForLoginError(const CUiAutomation &uiAutomation, std::wstr
 					message = kLoginErrorToolTipName;
 				}
 				if (sawTooltipAbsent || pIgnoreMessage == nullptr || message != *pIgnoreMessage) {
+					DebugLog::Write(kLogCategory, "login error shown: \"%ls\"", message.c_str());
 					outMessage = std::move(message);
 					return true;
 				}
+				DebugLog::Write(kLogCategory, "ignoring the previous attempt's error tooltip, still on screen");
 			}
 		}
 		if (!tooltipPresent) {
 			sawTooltipAbsent = true;
 		}
 		if (IsCancelled(pCancelRequested) || std::chrono::steady_clock::now() >= deadline) {
+			// No error inside the window is what this project reads as success (see this
+			// method's own comment) - worth saying so explicitly, because "nothing happened"
+			// and "we stopped looking" are the same line otherwise.
+			DebugLog::Write(kLogCategory, "no login error appeared (%s) - treating the attempt as successful",
+							IsCancelled(pCancelRequested) ? "cancelled" : "waited the full timeout");
 			return false;
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -613,11 +739,16 @@ bool CRiotClient::WaitForPlayButtonAndClick(const CUiAutomation &uiAutomation, s
 			const CUiElement playButton =
 				uiAutomation.FindFirstDescendantByNameAndControlType(window, kPlayButtonName, UIA_ButtonControlTypeId);
 			if (playButton.IsValid()) {
+				DebugLog::Write(kLogCategory, "Play button found - invoking it");
 				playButton.Invoke();
 				return true;
 			}
 		}
 		if (IsCancelled(pCancelRequested) || std::chrono::steady_clock::now() >= deadline) {
+			// Not load-bearing - the login already succeeded by the time this runs (see this
+			// method's own comment), so this is a note, not a failure.
+			DebugLog::Write(kLogCategory, "Play button not found (%s) - leaving the game unlaunched",
+							IsCancelled(pCancelRequested) ? "cancelled" : "timed out");
 			return false;
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));

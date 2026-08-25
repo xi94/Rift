@@ -23,6 +23,7 @@ add_executable (Rift
   "core/atomic_file.cpp"
   "core/crash_handler.cpp"
   "core/crypto.cpp"
+  "core/debug_log.cpp"
   "core/login_attempt.cpp"
   "core/master_key.cpp"
   "core/riot_client.cpp"

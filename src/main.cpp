@@ -11,9 +11,11 @@
 #include "asset_manager.h"
 #include "core/animator.h"
 #include "core/crash_handler.h"
+#include "core/debug_log.h"
 #include "core/master_key.h"
 #include "core/memory_arena.h"
 #include "core/storage.h"
+#include "core/ui_automation.h"
 #include "core/updater.h"
 #include "core/version.h"
 #include "font_manager.h"
@@ -35,6 +37,28 @@
 #include "window.h"
 
 namespace {
+// Starts the diagnostic log on construction and stops it on destruction. Declared as the very
+// first local in main() so that, by C++'s reverse-declaration-order teardown, it is the very
+// last one destroyed - which means every other local's destructor still has somewhere to log.
+// That matters specifically for CLoginAttempt's own destructor: a worker still wedged inside a
+// UI Automation call at shutdown is one of the two ways this app has actually been observed to
+// freeze, and a plain DebugLog::Shutdown() before `return 0` would run before that destructor
+// and lose the only line that would have said so.
+struct SDebugLogSession {
+	SDebugLogSession()
+	{
+		DebugLog::Init();
+	}
+
+	~SDebugLogSession()
+	{
+		DebugLog::Shutdown();
+	}
+
+	SDebugLogSession(const SDebugLogSession &) = delete;
+	SDebugLogSession &operator=(const SDebugLogSession &) = delete;
+};
+
 // One long-lived reservation for the whole process, used for exactly one thing:
 // CDrawList's per-frame vertex/index scratch - see core/memory_arena.h's own file
 // comment for why this fork keeps that one bump-allocation case and nothing else.
@@ -313,6 +337,22 @@ int main(int argc, char *argv[])
 	// it installs is process-wide, so this one call covers every thread this process ever
 	// creates (including CLoginAttempt's own worker threads), not just this one.
 	InstallCrashHandler();
+
+	// Right after the crash handler and before anything that could hang: this is what turns
+	// "it froze" into a log naming the exact call that never returned, plus a minidump of every
+	// thread taken while it is still stuck. On by default in a Debug build, and switched on in
+	// any build by setting the RIFT_DEBUG_LOG environment variable - see core/debug_log.h.
+	const SDebugLogSession debugLogSession;
+	if (DebugLog::IsEnabled() && DebugLog::GetFilePath()[0] != '\0') {
+		std::println("Diagnostic log: {}", DebugLog::GetFilePath());
+	}
+
+	// Before the first login attempt ever creates one - holds this process's multi-threaded
+	// apartment open so the per-attempt CoInitializeEx/CoUninitialize pairs stop building and
+	// tearing down the whole apartment (and UI Automation's state inside it) every time. See
+	// CUiAutomation::KeepProcessMtaAlive's own comment; safe here because it joins no apartment
+	// itself, so the render thread stays apartment-free.
+	CUiAutomation::KeepProcessMtaAlive();
 
 	// Must succeed before any CCrypto/CMasterKey/CStorage call - libsodium picks its own
 	// fastest-available implementation of every primitive at runtime (AES-NI vs a portable
@@ -876,6 +916,11 @@ int main(int argc, char *argv[])
 		renderer.SetEffectTime(timeSeconds);
 
 		RenderFrame(renderContext);
+
+		// Last thing in the frame, so it only ticks once a frame has actually been presented -
+		// the watchdog reads this to tell "the whole app is frozen" apart from "a login worker
+		// is stuck but the UI is fine", which look identical from outside the process.
+		DebugLog::MarkUiThreadAlive();
 	}
 
 	SaveNow(*pCarousel, settings, masterKey);

@@ -80,14 +80,17 @@ std::wstring ModuleRelativeOffset(void *pAddress)
 // is exactly the right fallback there. dumpDirectory is passed in rather than resolved here
 // again - the caller already needs it separately for the crash dialog's "Open Crash Folder"
 // button, and it's still valid even when this itself fails to produce a dump (nothing to open
-// then, but the folder path is still correct).
-std::wstring WriteMiniDump(EXCEPTION_POINTERS *pExceptionPointers, const std::wstring &dumpDirectory)
+// then, but the folder path is still correct). pTag and dumpType are parameters rather than
+// constants for the same reason: this serves two callers with genuinely different needs - the
+// crash path below, and WriteDiagnosticDump's deliberately much lighter hang dump.
+std::wstring WriteMiniDump(EXCEPTION_POINTERS *pExceptionPointers, const std::wstring &dumpDirectory,
+						   const wchar_t *pTag, MINIDUMP_TYPE dumpType)
 {
 	if (dumpDirectory.empty()) {
 		return L"";
 	}
 
-	const std::wstring path = dumpDirectory + L"\\Rift_crash_" + FormatTimestamp() + L".dmp";
+	const std::wstring path = dumpDirectory + L"\\Rift_" + pTag + L"_" + FormatTimestamp() + L".dmp";
 	const HANDLE hFile =
 		CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (hFile == INVALID_HANDLE_VALUE) {
@@ -99,17 +102,17 @@ std::wstring WriteMiniDump(EXCEPTION_POINTERS *pExceptionPointers, const std::ws
 	exceptionInfo.ExceptionPointers = pExceptionPointers;
 	exceptionInfo.ClientPointers = FALSE;
 
-	// Full memory, not just stack summaries - this handler's own audience (see this file's
-	// own header comment) wants to be able to load the dump in a real debugger and inspect
-	// memory/registers by hand, not just get a curated call stack.
-	const auto dumpType = static_cast<MINIDUMP_TYPE>(MiniDumpWithFullMemory | MiniDumpWithHandleData |
-													  MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules);
-
 	const BOOL written = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hFile, dumpType,
 										   pExceptionPointers != nullptr ? &exceptionInfo : nullptr, nullptr, nullptr);
 	CloseHandle(hFile);
 	return written != FALSE ? path : L"";
 }
+
+// Full memory, not just stack summaries - the crash path's own audience (see this file's own
+// header comment) wants to be able to load the dump in a real debugger and inspect
+// memory/registers by hand, not just get a curated call stack.
+constexpr auto kCrashDumpType = static_cast<MINIDUMP_TYPE>(MiniDumpWithFullMemory | MiniDumpWithHandleData |
+														   MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules);
 
 constexpr int kOpenFolderButtonId = 1001;
 constexpr int kCloseButtonId = 1002;
@@ -218,7 +221,7 @@ LONG WINAPI UnhandledExceptionFilterProc(EXCEPTION_POINTERS *pExceptionPointers)
 	const std::wstring reason = ExceptionCodeName(code);
 	const std::wstring offset = ModuleRelativeOffset(pExceptionPointers->ExceptionRecord->ExceptionAddress);
 	const std::wstring dumpDirectory = CrashDumpDirectory();
-	const std::wstring dumpPath = WriteMiniDump(pExceptionPointers, dumpDirectory);
+	const std::wstring dumpPath = WriteMiniDump(pExceptionPointers, dumpDirectory, L"crash", kCrashDumpType);
 
 	ShowCrashDialog(reason, offset, dumpPath, dumpDirectory);
 
@@ -253,7 +256,7 @@ LONG WINAPI UnhandledExceptionFilterProc(EXCEPTION_POINTERS *pExceptionPointers)
 
 	const std::wstring offset = ModuleRelativeOffset(exceptionRecord.ExceptionAddress);
 	const std::wstring dumpDirectory = CrashDumpDirectory();
-	const std::wstring dumpPath = WriteMiniDump(&exceptionPointers, dumpDirectory);
+	const std::wstring dumpPath = WriteMiniDump(&exceptionPointers, dumpDirectory, L"crash", kCrashDumpType);
 
 	ShowCrashDialog(pReason, offset, dumpPath, dumpDirectory);
 
@@ -295,4 +298,21 @@ void InstallCrashHandler()
 	std::set_terminate(TerminateHandler);
 	_set_purecall_handler(PureCallHandler);
 	_set_invalid_parameter_handler(InvalidParameterHandler);
+}
+
+std::wstring WriteDiagnosticDump(const wchar_t *pTag)
+{
+	// Deliberately cheap next to kCrashDumpType: this fires while the process is still alive
+	// and expected to carry on, so it captures every thread's stack and enough handle/module
+	// data to read them, but not the hundreds of megabytes full memory would cost - see this
+	// function's own declaration in the header.
+	constexpr auto kHangDumpType =
+		static_cast<MINIDUMP_TYPE>(MiniDumpWithThreadInfo | MiniDumpWithHandleData | MiniDumpWithUnloadedModules);
+
+	// Null exception pointers on purpose - there is no exception here, and MiniDumpWriteDump
+	// reads that as "just capture the current state of every thread", which is exactly what a
+	// hang needs. Note this does NOT go through g_bHandlingCrash: a diagnostic dump is not a
+	// crash, and taking one must never make a subsequent real crash fall through unhandled.
+	return WriteMiniDump(nullptr, CrashDumpDirectory(), pTag != nullptr && pTag[0] != L'\0' ? pTag : L"diagnostic",
+						 kHangDumpType);
 }

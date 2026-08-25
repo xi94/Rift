@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // A process-wide "last resort" crash handler - installs a top-level SEH exception filter
 // (SetUnhandledExceptionFilter) plus a std::terminate handler (std::set_terminate) and a few
 // smaller CRT hooks (_set_purecall_handler, _set_invalid_parameter_handler) that funnel into
@@ -34,3 +36,16 @@
 // process ever creates (including CLoginAttempt's own worker threads), not just the one that
 // calls it.
 void InstallCrashHandler();
+
+// Writes a minidump of this process, right now, without crashing it and without showing
+// anything to the user - the "it's frozen and I don't know where" counterpart to the crash
+// path above, called by core/debug_log.cpp's watchdog once a call has been stuck past its
+// hang threshold. Captures every thread's stack (MiniDumpWithThreadInfo, plus handle data for
+// the wait-chain question a hang usually turns into) but NOT full memory the way the crash
+// path does: this one fires while the process is still alive and expected to keep going, so
+// it deliberately stays small and quick rather than dumping a few hundred megabytes.
+//
+// pTag becomes part of the file name (Rift_<tag>_<timestamp>.dmp, alongside the crash dumps
+// in %LOCALAPPDATA%\Rift\crashes). Returns the full path of what it wrote, or an empty
+// string if it couldn't write one - safe to call from any thread.
+std::wstring WriteDiagnosticDump(const wchar_t *pTag);

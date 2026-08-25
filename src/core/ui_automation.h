@@ -89,6 +89,15 @@ class CUiAutomation {
 	// failed, same as Shutdown() itself.
 	~CUiAutomation();
 
+	// Call once, early in main(), before any CUiAutomation is ever constructed - keeps the
+	// process's multi-threaded apartment alive for as long as the process runs (via
+	// CoIncrementMTAUsage) so that the per-thread CoInitializeEx/CoUninitialize pair every
+	// Init()/Shutdown() below performs stops being an apartment create/destroy cycle. See the
+	// implementation's own comment for why repeatedly building and tearing the MTA down is a
+	// problem worth spending a call on. Safe to call more than once (the second does nothing),
+	// and safe from any thread including the render thread - it joins no apartment itself.
+	static void KeepProcessMtaAlive();
+
 	// Must succeed before any other method is called. Safe to call once per instance; not
 	// safe to call from more than one thread, or to call any other method on this instance
 	// from a thread other than the one Init() ran on - see this file's own comment. In
