@@ -1298,16 +1298,24 @@ void CAccountModal::DrawAccountRow(CDrawList &drawList, Rect right, Rect row, co
 	const CFont &secondary = m_fonts.GetSecondary();
 	const CStringView note = account.GetNote();
 
-	// Always block-centered as if a note were present (even when it isn't) - the username's
-	// own baseline then lands at the exact same offset from row.Y on every row regardless of
-	// note/no-note, which is what actually makes the rows read as aligned; centering a lone
-	// username across the *whole* row instead (an earlier version of this) put its baseline
-	// somewhere different than a note row's, so the first line of text visibly jumped around
-	// row to row even though the divider grid itself was already uniform.
+	// A row with a note centers the username+note pair as a block; a row without one centers
+	// the username on its own, level with the Edit/Remove buttons on the right (which are
+	// centered in the row - see RowRemoveButtonRect).
+	//
+	// The two therefore put the username's baseline in different places, and that's the
+	// deliberate trade: an earlier version pinned every username to the block position even
+	// with no note to go under it, so their baselines matched row to row, but a lone
+	// username then sat visibly high of the icons beside it - and a line of text that
+	// doesn't line up with the controls on its own row is the more noticeable of the two,
+	// since they're inches apart rather than rows apart.
 	const float blockHeight = body.GetLineHeight() + kRowLineGap + secondary.GetLineHeight();
 	const float blockY = row.Y + (row.H - blockHeight) * 0.5f;
-	const float usernameBaselineY = blockY + body.GetAscent();
 	const float noteBaselineY = blockY + body.GetLineHeight() + kRowLineGap + secondary.GetAscent();
+	// Visual centering (baseline = center + (ascent + descent) / 2, descent negative) rather
+	// than ascent alone, the same formula every other centered label in this project uses.
+	const float usernameBaselineY = note.Length > 0
+										? blockY + body.GetAscent()
+										: row.Y + row.H * 0.5f + (body.GetAscent() + body.GetDescent()) * 0.5f;
 	DrawText(drawList, body, row.X, usernameBaselineY, account.GetUsername(), ColorFadeAlpha(kColorTextBright, alpha));
 	if (note.Length > 0) {
 		DrawText(drawList, secondary, row.X, noteBaselineY, note, ColorFadeAlpha(kColorTextDim, alpha));
