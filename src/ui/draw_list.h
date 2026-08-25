@@ -182,6 +182,14 @@ class CDrawList {
 	static float ScaledRadius(float radius);
 	static void SetCornerRoundnessScale(float scale);
 
+	// UniformRadii's per-corner sibling, for a shape rounded on only some of its corners
+	// (the account panel's banner art, which is rounded to match the panel on its top-left
+	// and butts against panel internals everywhere else). Exists so that case doesn't have
+	// to hand-build a CornerRadii and silently opt out of both the Round Corners toggle and
+	// the Corner Roundness scale - which is exactly what it did, leaving the art's corner
+	// stuck at its design radius while the panel behind it squared off or rounded further.
+	static CornerRadii Radii(float topLeft, float topRight, float bottomRight, float bottomLeft);
+
 	// The base solid-fill primitive: every other flat-colored shape here (gradient
 	// corners, the color-picker SV square, glow quads) shares its two-triangle quad
 	// layout, just with different per-vertex colors/UVs/target kind.

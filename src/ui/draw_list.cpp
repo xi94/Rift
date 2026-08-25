@@ -70,6 +70,12 @@ CornerRadii CDrawList::UniformRadii(float radius)
 	return CornerRadii{r, r, r, r};
 }
 
+CornerRadii CDrawList::Radii(float topLeft, float topRight, float bottomRight, float bottomLeft)
+{
+	return CornerRadii{ScaledRadius(topLeft), ScaledRadius(topRight), ScaledRadius(bottomRight),
+					   ScaledRadius(bottomLeft)};
+}
+
 void CDrawList::SetRoundedCornersEnabled(bool enabled)
 {
 	g_bRoundedCornersEnabled = enabled;

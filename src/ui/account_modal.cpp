@@ -1695,16 +1695,24 @@ void CAccountModal::Draw(CDrawList &drawList)
 	// A faint top-edge highlight - a common "catching light from above" cue for an
 	// elevated card on a dark UI, more visible here than a drop shadow would be against
 	// the already-dark dimmed backdrop.
-	drawList.AddRectFilled(inner.X + kPanelRadius, inner.Y, inner.W - kPanelRadius * 2.0f, 1.0f,
+	// Inset by the panel's *effective* corner radius so the highlight stops exactly where
+	// the corner curve starts - at any other roundness a fixed inset either leaves a gap at
+	// both ends or runs out past the curve.
+	const float highlightInset = CDrawList::ScaledRadius(kPanelRadius);
+	drawList.AddRectFilled(inner.X + highlightInset, inner.Y, inner.W - highlightInset * 2.0f, 1.0f,
 						   ColorFadeAlpha(Color{255, 255, 255, 22}, alpha));
 
 	const Rect left = layout.Left;
 	const Rect right = layout.Right;
 
-	// Banner image: rounded only on the top-left, matching the panel's own rounded
-	// corner there - every other edge of the image butts against something internal.
+	// Banner image: rounded only on the top-left, matching the panel's own rounded corner
+	// there - every other edge of the image butts against something internal. Through
+	// CDrawList::Radii, not a hand-built CornerRadii: the panel behind it rounds by the
+	// Corner Roundness setting, and an art corner that ignored that setting stayed notched
+	// while the panel squared off (leaving a see-through wedge at the panel's top-left) and
+	// stayed square while the panel rounded further (letting the art overhang it).
 	if (banner.pTexture != nullptr) {
-		const CornerRadii imageRadii{kPanelRadius - kPanelBorderThickness, 0.0f, 0.0f, 0.0f};
+		const CornerRadii imageRadii = CDrawList::Radii(kPanelRadius - kPanelBorderThickness, 0.0f, 0.0f, 0.0f);
 		const UvRect uv = CDrawList::ComputeCoverUv(left.W, left.H, banner.TextureAspect, 1.0f);
 		drawList.AddRectRoundedTexturedUv(left.X, left.Y, left.W, left.H, imageRadii, uv.U0, uv.V0, uv.U1, uv.V1,
 										  banner.pTexture, ColorFadeAlpha(Color{255, 255, 255, 255}, alpha));

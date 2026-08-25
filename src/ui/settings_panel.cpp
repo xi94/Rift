@@ -93,12 +93,15 @@ constexpr float kSliderValueLabelWidth = 48.0f;
 constexpr float kAnimationSpeedMin = 0.25f;
 constexpr float kAnimationSpeedMax = 3.0f;
 
-// 1.0 is the radius every widget in this project was drawn at; 0 squares everything off,
-// and the ceiling is deliberately past 1 so small controls can be pushed all the way to
-// pills. The rounded-rect builder clamps a radius against the shape's own size, so the top
-// of this range can't produce a self-intersecting corner.
+// 1.0 is the radius every widget in this project was drawn at, and 0 squares everything
+// off. The ceiling is 1.5 rather than something larger because the rounded-rect builder
+// clamps every radius to half the shape's shorter side (see BuildRoundedRectPoints): a
+// control already drawn as a pill - a toggle track, a slider thumb, a circular badge - is
+// at that limit by definition and cannot get rounder no matter what this says, and past
+// roughly 1.5 most of the remaining shapes hit it too, which made the top of a longer
+// slider feel dead.
 constexpr float kCornerRoundnessMin = 0.0f;
-constexpr float kCornerRoundnessMax = 2.0f;
+constexpr float kCornerRoundnessMax = 1.5f;
 
 // Nominal Settings-facing units, not literal baked pixels - CFontManager's display-
 // scale factor is what turns a value here into the real pixel height stb_truetype
