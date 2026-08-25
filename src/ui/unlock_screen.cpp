@@ -153,10 +153,10 @@ bool CUnlockScreen::ConsumeSetupSucceeded()
 
 bool CUnlockScreen::AttemptUnlock()
 {
-	const bool bUnlocked = m_masterKey.Unlock(m_passwordInput.GetValue(), m_settings.m_aMasterPasswordSalt,
-											 m_settings.m_masterPasswordOpsLimit, m_settings.m_masterPasswordMemLimit,
-											 m_settings.m_aMasterPasswordWrapNonce,
-											 m_settings.m_aMasterPasswordWrappedDek);
+	const bool bUnlocked =
+		m_masterKey.Unlock(m_passwordInput.GetValue(), m_settings.m_aMasterPasswordSalt,
+						   m_settings.m_masterPasswordOpsLimit, m_settings.m_masterPasswordMemLimit,
+						   m_settings.m_aMasterPasswordWrapNonce, m_settings.m_aMasterPasswordWrappedDek);
 	if (bUnlocked) {
 		m_passwordInput.SetValue(StringViewFromCString(""));
 		m_bWrongPassword = false;
@@ -398,12 +398,12 @@ void CUnlockScreen::Draw(CDrawList &drawList)
 							 !m_bPasswordRevealed);
 		const Rect reveal = RevealButtonRect(field);
 		DrawEyeGlyph(drawList, m_assets, reveal, m_bPasswordRevealed,
-					RectContainsPoint(reveal, m_flMouseX, m_flMouseY) ? kColorTextBright : kColorTextDim);
+					 RectContainsPoint(reveal, m_flMouseX, m_flMouseY) ? kColorTextBright : kColorTextDim);
 
 		const Rect button = ButtonRect(card);
 		drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
 		DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H, StringViewFromCString("Unlock"),
-						 Color{245, 245, 248, 255});
+						 ColorForegroundOn(accent));
 
 		if (m_bWrongPassword) {
 			const float messageY = button.Y + button.H + kGap + secondary.GetAscent();
@@ -428,7 +428,7 @@ void CUnlockScreen::Draw(CDrawList &drawList)
 						 kColorTextBright, accent, !m_bPasswordRevealed);
 	const Rect passwordReveal = RevealButtonRect(passwordField);
 	DrawEyeGlyph(drawList, m_assets, passwordReveal, m_bPasswordRevealed,
-				RectContainsPoint(passwordReveal, m_flMouseX, m_flMouseY) ? kColorTextBright : kColorTextDim);
+				 RectContainsPoint(passwordReveal, m_flMouseX, m_flMouseY) ? kColorTextBright : kColorTextDim);
 
 	const Rect confirmField = SetupConfirmFieldRect(card);
 	DrawFieldChrome(drawList, confirmField, m_confirmPasswordInput.m_bFocused, accent);
@@ -436,17 +436,18 @@ void CUnlockScreen::Draw(CDrawList &drawList)
 								kColorTextBright, accent, !m_bPasswordRevealed);
 	const Rect confirmReveal = RevealButtonRect(confirmField);
 	DrawEyeGlyph(drawList, m_assets, confirmReveal, m_bPasswordRevealed,
-				RectContainsPoint(confirmReveal, m_flMouseX, m_flMouseY) ? kColorTextBright : kColorTextDim);
+				 RectContainsPoint(confirmReveal, m_flMouseX, m_flMouseY) ? kColorTextBright : kColorTextDim);
 
 	const Rect button = SetupButtonRect(card);
 	drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
 	DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H, StringViewFromCString("Create Password"),
-					 Color{245, 245, 248, 255});
+					 ColorForegroundOn(accent));
 
 	if (m_bPasswordMismatch || m_bSetupFailed) {
 		const float messageY = button.Y + button.H + kGap + secondary.GetAscent();
-		DrawText(drawList, secondary, card.X + kCardPadding, messageY,
-				 StringViewFromCString(m_bPasswordMismatch ? "Passwords don't match." : "Something went wrong - try again."),
-				 kColorError);
+		DrawText(
+			drawList, secondary, card.X + kCardPadding, messageY,
+			StringViewFromCString(m_bPasswordMismatch ? "Passwords don't match." : "Something went wrong - try again."),
+			kColorError);
 	}
 }

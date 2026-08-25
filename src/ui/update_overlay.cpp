@@ -56,7 +56,7 @@ Rect CloseButtonRect(Rect card)
 Rect PrimaryButtonRect(Rect card)
 {
 	return Rect{card.X + kCardPadding, card.Y + card.H - kCardPadding - kButtonHeight, card.W - kCardPadding * 2.0f,
-			   kButtonHeight};
+				kButtonHeight};
 }
 
 // Just past where the title + subtitle lines actually end, so the box's top can't drift out
@@ -94,7 +94,7 @@ Rect NotesScrollbarTrackRect(Rect box)
 bool StageIsDismissable(EUpdateStage stage)
 {
 	return stage != EUpdateStage::UPDATE_STAGE_DOWNLOADING && stage != EUpdateStage::UPDATE_STAGE_VERIFYING &&
-		  stage != EUpdateStage::UPDATE_STAGE_INSTALLING;
+		   stage != EUpdateStage::UPDATE_STAGE_INSTALLING;
 }
 
 void FormatBytes(std::uint64_t bytes, char *pOut, std::size_t outCapacity)
@@ -139,7 +139,7 @@ std::uint32_t SplitLines(CStringView text, CStringView *pOutLines, std::uint32_t
 // split mid-word (this project's manifest text is never expected to contain one, and a mid-
 // word break would need per-glyph width lookups this helper has no reason to do).
 std::uint32_t WrapParagraph(const CFont &font, CStringView paragraph, float maxWidth, CStringView *pOutLines,
-						   std::uint32_t maxLines)
+							std::uint32_t maxLines)
 {
 	if (paragraph.Length == 0) {
 		if (maxLines == 0) {
@@ -219,7 +219,7 @@ std::uint32_t WrapText(const CFont &font, CStringView text, float maxWidth, CStr
 // the Y just past the last line drawn, in case a caller ever needs to stack something
 // beneath it.
 float DrawWrappedText(CDrawList &drawList, const CFont &font, float x, float y, float maxWidth, CStringView text,
-					 Color color, std::uint32_t maxLines)
+					  Color color, std::uint32_t maxLines)
 {
 	CStringView lines[kMaxMessageLines];
 	const std::uint32_t cappedMaxLines = maxLines < kMaxMessageLines ? maxLines : kMaxMessageLines;
@@ -394,12 +394,10 @@ ECursorKind CUpdateOverlay::GetDesiredCursor() const
 	}
 
 	const Rect primaryButton = PrimaryButtonRect(card);
-	const bool hasPrimaryAction = stage == EUpdateStage::UPDATE_STAGE_AVAILABLE ||
-								  stage == EUpdateStage::UPDATE_STAGE_DOWNLOADING ||
-								  stage == EUpdateStage::UPDATE_STAGE_ERROR ||
-								  stage == EUpdateStage::UPDATE_STAGE_CANCELLED ||
-								  stage == EUpdateStage::UPDATE_STAGE_UP_TO_DATE ||
-								  stage == EUpdateStage::UPDATE_STAGE_CHECK_FAILED;
+	const bool hasPrimaryAction =
+		stage == EUpdateStage::UPDATE_STAGE_AVAILABLE || stage == EUpdateStage::UPDATE_STAGE_DOWNLOADING ||
+		stage == EUpdateStage::UPDATE_STAGE_ERROR || stage == EUpdateStage::UPDATE_STAGE_CANCELLED ||
+		stage == EUpdateStage::UPDATE_STAGE_UP_TO_DATE || stage == EUpdateStage::UPDATE_STAGE_CHECK_FAILED;
 	if (hasPrimaryAction && RectContainsPoint(primaryButton, m_flMouseX, m_flMouseY)) {
 		return ECursorKind::CURSOR_HAND;
 	}
@@ -458,7 +456,7 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 		// reads as "Checking..." either way, never a blank/confusing IDLE screen.
 		DrawTitle(StringViewFromCString("Checking for Updates"));
 		DrawText(drawList, secondary, contentX, cursorY, StringViewFromCString("This will only take a moment."),
-				kColorTextDim);
+				 kColorTextDim);
 	} else if (stage == EUpdateStage::UPDATE_STAGE_UP_TO_DATE) {
 		DrawTitle(StringViewFromCString("You're Up to Date"));
 		std::snprintf(lineBuffer, sizeof(lineBuffer), "Rift %s is the latest version.", kAppVersion);
@@ -472,16 +470,16 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 	} else if (stage == EUpdateStage::UPDATE_STAGE_CHECK_FAILED) {
 		DrawTitle(StringViewFromCString("Couldn't Check for Updates"));
 		DrawWrappedText(drawList, secondary, contentX, cursorY, contentW,
-					   StringViewFromCString(m_updater.GetErrorMessage()), kColorError, kMaxMessageLines);
+						StringViewFromCString(m_updater.GetErrorMessage()), kColorError, kMaxMessageLines);
 
 		const Rect button = PrimaryButtonRect(card);
 		drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
 		DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H, StringViewFromCString("Try Again"),
-						 Color{245, 245, 248, 255});
+						 ColorForegroundOn(accent));
 	} else if (stage == EUpdateStage::UPDATE_STAGE_AVAILABLE) {
 		DrawTitle(StringViewFromCString("Update Available"));
 		std::snprintf(lineBuffer, sizeof(lineBuffer), "Version %s is ready to install.",
-					 m_updater.GetManifest().szVersion);
+					  m_updater.GetManifest().szVersion);
 		DrawText(drawList, secondary, contentX, cursorY, StringViewFromCString(lineBuffer), kColorTextDim);
 
 		const Rect box = NotesBoxRect(card, m_fonts);
@@ -490,8 +488,8 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 
 		const float wrapWidth = box.W - kNotesScrollbarMargin;
 		CStringView lines[kMaxNotesLines];
-		const std::uint32_t lineCount =
-			WrapText(secondary, StringViewFromCString(m_updater.GetManifest().szNotes), wrapWidth, lines, kMaxNotesLines);
+		const std::uint32_t lineCount = WrapText(secondary, StringViewFromCString(m_updater.GetManifest().szNotes),
+												 wrapWidth, lines, kMaxNotesLines);
 		const float lineHeight = secondary.GetLineHeight();
 		const float contentHeight = static_cast<float>(lineCount) * lineHeight;
 
@@ -506,23 +504,23 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 		drawList.PopClipRect();
 
 		m_notesScroll.DrawEdgeFade(drawList, box, contentHeight, box.H, Color{22, 22, 25, 255});
-		m_notesScroll.Draw(drawList, NotesScrollbarTrackRect(box), contentHeight, box.H,
-						   Color{120, 120, 128, 190}, m_flMouseX, m_flMouseY);
+		m_notesScroll.Draw(drawList, NotesScrollbarTrackRect(box), contentHeight, box.H, Color{120, 120, 128, 190},
+						   m_flMouseX, m_flMouseY);
 
 		const Rect button = PrimaryButtonRect(card);
 		drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
 		DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H,
-						 StringViewFromCString("Download & Install"), Color{245, 245, 248, 255});
+						 StringViewFromCString("Download & Install"), ColorForegroundOn(accent));
 	} else if (stage == EUpdateStage::UPDATE_STAGE_MANUAL_UPGRADE_REQUIRED) {
 		DrawTitle(StringViewFromCString("Manual Update Required"));
 		std::snprintf(lineBuffer, sizeof(lineBuffer), "Version %s is out - please download it manually",
-					 m_updater.GetManifest().szVersion);
+					  m_updater.GetManifest().szVersion);
 		DrawText(drawList, secondary, contentX, cursorY, StringViewFromCString(lineBuffer), kColorTextDim);
 		cursorY += secondary.GetLineHeight();
 		DrawText(drawList, secondary, contentX, cursorY, StringViewFromCString("from the GitHub releases page."),
-				kColorTextDim);
+				 kColorTextDim);
 	} else if (stage == EUpdateStage::UPDATE_STAGE_DOWNLOADING || stage == EUpdateStage::UPDATE_STAGE_VERIFYING ||
-			  stage == EUpdateStage::UPDATE_STAGE_INSTALLING) {
+			   stage == EUpdateStage::UPDATE_STAGE_INSTALLING) {
 		DrawTitle(StringViewFromCString("Updating Rift"));
 
 		const std::uint64_t downloaded = m_updater.GetBytesDownloaded();
@@ -566,15 +564,16 @@ void CUpdateOverlay::Draw(CDrawList &drawList)
 	} else if (stage == EUpdateStage::UPDATE_STAGE_READY_TO_RELAUNCH) {
 		DrawTitle(StringViewFromCString("Restarting..."));
 	} else if (stage == EUpdateStage::UPDATE_STAGE_ERROR || stage == EUpdateStage::UPDATE_STAGE_CANCELLED) {
-		DrawTitle(StringViewFromCString(stage == EUpdateStage::UPDATE_STAGE_ERROR ? "Update Failed" : "Update Cancelled"));
+		DrawTitle(
+			StringViewFromCString(stage == EUpdateStage::UPDATE_STAGE_ERROR ? "Update Failed" : "Update Cancelled"));
 		if (stage == EUpdateStage::UPDATE_STAGE_ERROR) {
 			DrawWrappedText(drawList, secondary, contentX, cursorY, contentW,
-						   StringViewFromCString(m_updater.GetErrorMessage()), kColorError, kMaxMessageLines);
+							StringViewFromCString(m_updater.GetErrorMessage()), kColorError, kMaxMessageLines);
 		}
 
 		const Rect button = PrimaryButtonRect(card);
 		drawList.AddRectRoundedFilled(button.X, button.Y, button.W, button.H, CDrawList::UniformRadii(8.0f), accent);
 		DrawCenteredText(drawList, body, button.X, button.Y, button.W, button.H, StringViewFromCString("Try Again"),
-						 Color{245, 245, 248, 255});
+						 ColorForegroundOn(accent));
 	}
 }

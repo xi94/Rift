@@ -66,6 +66,40 @@ inline Color ColorLighten(Color color, std::uint8_t amount)
 	return Color{Clamp255(color.R + amount), Clamp255(color.G + amount), Clamp255(color.B + amount), color.A};
 }
 
+// Relative luminance, 0 (black) to 1 (white), weighted the way the eye actually responds -
+// green carries most of the perceived brightness and blue almost none, which is why a
+// saturated yellow reads as far lighter than a saturated blue of the same "value".
+//
+// Channels are linearized with a plain square rather than sRGB's exact piecewise 2.4 curve.
+// The only thing this feeds is a two-way choice between a light and a dark foreground, and
+// the two formulas disagree only within a hair of the crossover, where either answer is
+// equally readable - so the cheaper one buys nothing but a <cmath> dependency in a header
+// every translation unit includes.
+inline float ColorRelativeLuminance(Color color)
+{
+	const float r = static_cast<float>(color.R) / 255.0f;
+	const float g = static_cast<float>(color.G) / 255.0f;
+	const float b = static_cast<float>(color.B) / 255.0f;
+	return 0.2126f * r * r + 0.7152f * g * g + 0.0722f * b * b;
+}
+
+// The foreground that stays readable on `background`: near-black on a light one, the usual
+// near-white on a dark one. Every accent-filled surface in this app (buttons, the toggle
+// switch's knob, the slider thumb) draws its content through this rather than assuming
+// white, because the accent color is the user's to choose - and white text on a bright
+// yellow or cyan accent is unreadable.
+//
+// The 0.179 crossover is where WCAG's own contrast ratio against black overtakes the one
+// against white, so this picks whichever genuinely contrasts more rather than guessing at a
+// midpoint. Neither result is pure black or white: both would be harsher against a
+// saturated color than the app's own text tones.
+inline Color ColorForegroundOn(Color background)
+{
+	constexpr Color kOnLight{18, 18, 20, 255};
+	constexpr Color kOnDark{245, 245, 248, 255};
+	return ColorRelativeLuminance(background) > 0.179f ? kOnLight : kOnDark;
+}
+
 inline Color ColorLerp(Color a, Color b, float t)
 {
 	auto Lerp8 = [](std::uint8_t from, std::uint8_t to, float t) {
@@ -137,8 +171,8 @@ inline PendingHit PendingHitFromHitTest(std::int32_t hitTestResult)
 // CWidgetStack::GetDesiredCursor can treat it as "keep looking further down the stack"
 // without a separate has-an-opinion bit.
 enum class ECursorKind : std::uint8_t {
-	CURSOR_ARROW,   // the plain default - decorations, plain text, anywhere with no affordance
-	CURSOR_HAND,	// hovering something clickable - a button, a toggle, a row, a link
-	CURSOR_IBEAM,   // hovering a text field
-	CURSOR_DRAG, // a drag is actively in progress (a slider thumb, a scrollbar thumb, ...)
+	CURSOR_ARROW, // the plain default - decorations, plain text, anywhere with no affordance
+	CURSOR_HAND,  // hovering something clickable - a button, a toggle, a row, a link
+	CURSOR_IBEAM, // hovering a text field
+	CURSOR_DRAG,  // a drag is actively in progress (a slider thumb, a scrollbar thumb, ...)
 };

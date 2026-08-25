@@ -1595,7 +1595,7 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 		drawList.AddRectRoundedFilled(save.X, save.Y, save.W, save.H, CDrawList::UniformRadii(8.0f),
 									  ColorFadeAlpha(saveColor, alpha));
 		DrawCenteredText(drawList, body, save.X, save.Y, save.W, save.H, StringViewFromCString("Save"),
-						 ColorFadeAlpha(saveEnabled ? Color{245, 245, 248, 255} : kColorTextDim, alpha));
+						 ColorFadeAlpha(saveEnabled ? ColorForegroundOn(saveColor) : kColorTextDim, alpha));
 
 		const Rect cancel = EditCancelButtonRect(save);
 		const bool hoverCancel = RectContainsPoint(cancel, m_flMouseX, m_flMouseY);
@@ -1660,7 +1660,7 @@ void CAccountModal::DrawFooter(CDrawList &drawList, Rect footer, std::uint8_t al
 									  CDrawList::UniformRadii(8.0f), ColorFadeAlpha(buttonColor, alpha));
 		DrawCenteredText(drawList, body, loginButton.X, loginButton.Y, loginButton.W, loginButton.H,
 						 StringViewFromCString("Login"),
-						 ColorFadeAlpha(loginEnabled ? Color{245, 245, 248, 255} : kColorTextDim, alpha));
+						 ColorFadeAlpha(loginEnabled ? ColorForegroundOn(buttonColor) : kColorTextDim, alpha));
 	}
 }
 

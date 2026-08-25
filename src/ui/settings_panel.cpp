@@ -661,8 +661,10 @@ void DrawToggle(CDrawList &drawList, Rect rect, float onAmount, Color accent, st
 
 	const float dotSize = rect.H - 6.0f;
 	const float dotX = rect.X + 3.0f + (rect.W - rect.H) * onAmount;
+	// Contrasted against the track it's sitting on, which is itself mid-lerp toward the
+	// user's accent - a white knob disappears entirely on a bright accent.
 	drawList.AddRectRoundedFilled(dotX, rect.Y + 3.0f, dotSize, dotSize, CDrawList::UniformRadii(dotSize * 0.5f),
-								  ColorFadeAlpha(Color{245, 245, 248, 255}, alpha));
+								  ColorFadeAlpha(ColorForegroundOn(track), alpha));
 }
 
 // track is the slider's hit rect (SliderTrackRect); t is where the thumb sits (0..1) and
@@ -701,9 +703,10 @@ void DrawSlider(CDrawList &drawList, const CFont &font, Rect track, float t, CSt
 
 	const float thumbCx = track.X + fillW;
 	const float thumbCy = track.Y + track.H * 0.5f;
+	// Against the accent, since the thumb rides the end of the filled part of the track.
 	drawList.AddRectRoundedFilled(thumbCx - kSliderThumbRadius, thumbCy - kSliderThumbRadius, kSliderThumbRadius * 2.0f,
 								  kSliderThumbRadius * 2.0f, CDrawList::UniformRadii(kSliderThumbRadius),
-								  ColorFadeAlpha(Color{245, 245, 248, 255}, alpha));
+								  ColorFadeAlpha(ColorForegroundOn(accent), alpha));
 }
 
 // The -/value/+ control used by both Font Size and Secondary Font Size - value is

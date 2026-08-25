@@ -113,14 +113,14 @@ std::pair<float, float> PopupSize()
 			kPopupPadding * 2.0f + kSvSize + kStripGap + kHueStripHeight};
 }
 
-// A white outer ring around the picked color itself, not a plain filled dot - a
-// fill-only handle would disappear against a same-colored background (e.g. the SV
-// square's own white corner at low saturation), so the marker needs a fixed-contrast
-// border regardless of what color it's currently pointing at.
+// A ring around the picked color itself, not a plain filled dot - a fill-only handle
+// disappears against a same-colored background. The ring is contrasted against the color
+// it's pointing at rather than being a fixed white, which is what it used to be: white on
+// the SV square's own white corner is exactly as invisible as no ring at all.
 void DrawHandleRing(CDrawList &drawList, float cx, float cy, Color fill)
 {
 	drawList.AddRectRoundedFilled(cx - kHandleRadius, cy - kHandleRadius, kHandleRadius * 2.0f, kHandleRadius * 2.0f,
-								  CDrawList::UniformRadii(kHandleRadius), Color{255, 255, 255, 255});
+								  CDrawList::UniformRadii(kHandleRadius), ColorForegroundOn(fill));
 	const float inner = kHandleRadius - 2.5f;
 	drawList.AddRectRoundedFilled(cx - inner, cy - inner, inner * 2.0f, inner * 2.0f, CDrawList::UniformRadii(inner),
 								  fill);
