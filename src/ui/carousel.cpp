@@ -71,12 +71,13 @@ constexpr Color kModeSwitcherBg{26, 26, 30, 255};
 constexpr Color kModeSwitcherBorder{58, 58, 64, 255};
 // The active row's fill is a plain neutral grey plus a thin accent-colored bar on its
 // left edge, not a solid accent-tinted block - "indicator, not a wash of color."
-// The active row's base fill, before the accent is mixed into it (see DrawModeSwitcher) -
-// enough accent to read as selected, not so much that a bright accent turns the flyout into
-// the loudest thing on screen.
+// The active row's highlight stays a plain neutral box: the accent belongs on the bar
+// beside it and on the zoom readout, not on the surface behind the whole row. Tinting and
+// outlining this too made the flyout's selected row the loudest thing on screen and
+// restyled a piece of chrome that was never the point.
 constexpr Color kModeSwitcherActiveRowFill{52, 52, 58, 255};
-constexpr float kModeSwitcherActiveRowAccentMix = 0.35f;
 constexpr Color kModeSwitcherText{190, 190, 196, 255};
+constexpr Color kModeSwitcherTextActive{240, 240, 244, 255};
 constexpr float kModeSwitcherRowIconSize = 24.0f;
 constexpr float kModeSwitcherRowIconGap = 10.0f;
 
@@ -1209,14 +1210,10 @@ void CCarousel::DrawModeSwitcher(CDrawList &drawList) const
 		// row's 3px accent bar either way.
 		const float contentX = row.X + 12.0f;
 		if (active) {
-			// Tinted with the accent and outlined, like every other selected/accent surface
-			// in the app - this row used to be a flat grey with a hardcoded purple bar, which
-			// stayed purple no matter what accent the user picked.
-			const Color activeFill =
-				ColorLerp(kModeSwitcherActiveRowFill, m_clrAccent, kModeSwitcherActiveRowAccentMix);
-			drawList.AddRectRoundedBordered(row.X, row.Y, row.W, row.H, CDrawList::UniformRadii(6.0f),
-											ColorFadeAlpha(activeFill, alpha),
-											ColorFadeAlpha(ColorOutlineOn(activeFill), alpha), 1.0f);
+			drawList.AddRectRoundedFilled(row.X, row.Y, row.W, row.H, CDrawList::UniformRadii(6.0f),
+										  ColorFadeAlpha(kModeSwitcherActiveRowFill, alpha));
+			// The bar is the one thing in this row that follows the accent - it used to be a
+			// hardcoded purple that stayed purple whatever accent was picked.
 			drawList.AddRectRoundedFilled(row.X + 2.0f, row.Y + 3.0f, 3.0f, row.H - 6.0f, CDrawList::UniformRadii(1.5f),
 										  ColorFadeAlpha(m_clrAccent, alpha));
 		}
@@ -1226,12 +1223,7 @@ void CCarousel::DrawModeSwitcher(CDrawList &drawList) const
 			kModeSwitcherRowIconSize,
 			kModeSwitcherRowIconSize,
 		};
-		// The active row's own content contrasts against the fill it sits on rather than
-		// assuming white, since that fill now carries the user's accent.
-		const Color rowContent =
-			active
-				? ColorForegroundOn(ColorLerp(kModeSwitcherActiveRowFill, m_clrAccent, kModeSwitcherActiveRowAccentMix))
-				: kModeSwitcherText;
+		const Color rowContent = active ? kModeSwitcherTextActive : kModeSwitcherText;
 		DrawModeGlyph(drawList, m_assets, mode, iconBox, ColorFadeAlpha(rowContent, alpha));
 		DrawText(drawList, body, contentX + kModeSwitcherRowIconSize + kModeSwitcherRowIconGap,
 				 row.Y + row.H * 0.5f + (body.GetAscent() + body.GetDescent()) * 0.5f, ViewModeName(mode),
