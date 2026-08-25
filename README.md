@@ -7,6 +7,7 @@ https://github.com/user-attachments/assets/0f34ccb4-8154-4b15-878b-d3f58a68f2d2
 ## Features
 
 - **One-click login** — launches the Riot Client, fills the form, and presses Play for you
+- **Tray quick-login** — right-click the tray icon to sign in without opening the window; minimizing hides Rift there
 - **Encrypted vault** — accounts stored encrypted, master password derived with Argon2
 - **Anti screen-capture** — the window won't show up in screenshares or screenshots
 - **Three views** — Ctrl+Scroll to zoom between Carousel, Grid, and List
